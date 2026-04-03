@@ -15,7 +15,7 @@ module molecular_diff
     real(rk), parameter, public :: A_O2 = 0.2604_rk
     real(rk), parameter, public :: B_O2 = 0.006383_rk
 
-    ! NO3, NO2 and NH4 (method DIFF_ION_LINEAR)
+    ! NO3, NO2, NH4 and PO4 (method DIFF_ION_LINEAR)
     ! Coefficients m0, m1 are taken directly from Boudreau (1997) Tables 4.7 and 4.8. 
     real(rk), parameter, public :: m0_NO3 = 9.50_rk
     real(rk), parameter, public :: m1_NO3 = 0.388_rk
@@ -25,6 +25,23 @@ module molecular_diff
     ! NH4
     real(rk), parameter, public :: m0_NH4 = 9.50_rk
     real(rk), parameter, public :: m1_NH4 = 0.413_rk
+    ! PO4
+    real(rk), parameter, public :: m0_PO4 = 2.62_rk
+    real(rk), parameter, public :: m1_PO4 = 0.143_rk
+
+    !--- Carbonate chemistry
+    ! CO2   (method DIFF_O2CO2_AB)
+    ! Eq. 4.59 (Boudreau 1997)
+    real(rk), parameter, public :: A_CO2 = 0.1954_rk
+    real(rk), parameter, public :: B_CO2 = 0.005089_rk
+    ! HCO3  (method DIFF_ION_LINEAR)
+    ! Table 4.8 (Boudreau 1997)
+    real(rk), parameter, public :: m0_HCO3 = 5.06_rk
+    real(rk), parameter, public :: m1_HCO3 = 0.275_rk
+    ! CO3  (method DIFF_ION_LINEAR)
+    ! Table 4.8 (Boudreau 1997)
+    real(rk), parameter, public :: m0_CO3 = 4.33_rk
+    real(rk), parameter, public :: m1_CO3 = 0.199_rk
 
 
 end module molecular_diff
