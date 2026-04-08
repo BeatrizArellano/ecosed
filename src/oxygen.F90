@@ -10,20 +10,20 @@ module oxygen
    ! ------------------------------------------------------------------
    ! Air-sea oxygen exchange
    !
-   ! Uses:
-   !   - k660 from gas_exchange module [m s-1]
+   ! Inputs:
+   !   - wind speed [m s-1]
    !   - in situ temperature [degC]
    !   - practical salinity [PSU]
    !   - dissolved oxygen [mmol m-3]
    !
    ! Computes:
    !   - Schmidt number for O2
+   !   - k660 from wind speed using Wanninkhof (2014)
    !   - gas transfer velocity for O2
    !   - oxygen saturation concentration
    !   - air-sea oxygen flux
    !
-   ! Flux sign convention:
-   !   positive downward into the ocean
+   ! Flux sign convention: positive into the ocean
    !
    ! Notes:
    ! - O2 saturation follows García and Gordon (1992), as in MEDUSA2.0.
@@ -40,7 +40,7 @@ module oxygen
       type(type_dependency_id) :: id_sal
 
       ! --- Surface dependencies
-      type(type_horizontal_dependency_id) :: id_k660
+      type(type_horizontal_dependency_id) :: id_wind
       type(type_horizontal_dependency_id) :: id_ice_fraction
 
       ! --- Diagnostics
@@ -76,16 +76,14 @@ contains
       ! Environmental dependencies
       call self%register_dependency(self%id_temp, standard_variables%temperature)
       call self%register_dependency(self%id_sal,  standard_variables%practical_salinity)
+      call self%register_dependency(self%id_wind, standard_variables%wind_speed)
       if (self%apply_ice_cover) then
         ! Optional sea-ice fraction
         call self%register_dependency(self%id_ice_fraction, standard_variables%ice_area_fraction, required=.true.)
       end if
-
-      ! Surface gas transfer velocity normalized to Sc = 660
-      call self%register_dependency(self%id_k660, 'k660', 'm s-1','Gas exchange velocity normalized to Schmidt number 660')
       
       ! Diagnostics
-      call self%register_diagnostic_variable(self%id_o2sat, 'o2_sat', 'mmol m-3', 'Oxygen saturation concentration', source=source_do_surface)
+      call self%register_diagnostic_variable(self%id_o2sat,  'o2_sat', 'mmol m-3', 'Oxygen saturation concentration', source=source_do_surface)
       call self%register_diagnostic_variable(self%id_o2flux, 'o2_flux', 'mmol m-2 d-1', 'Air-sea oxygen flux, positive into ocean', source=source_do_surface)
 
    end subroutine initialize
@@ -99,7 +97,7 @@ contains
    !   -1.9 <= T <= 40 °C,  0 <= S <= 42 PSU
    !
    ! O2 saturation follows García and Gordon (1992),
-   ! Based in the MEDUSA2.0 implementation.
+   ! Based on the MEDUSA2.0 implementation.
    ! Air-sea exchange is scaled from k660 using the
    ! Schmidt number for O2, with positive flux defined
    ! into the ocean.
@@ -109,7 +107,7 @@ contains
       _DECLARE_ARGUMENTS_DO_SURFACE_
 
       real(rk) :: o2, temp, sal
-      real(rk) :: k660, k_o2, sc_o2
+      real(rk) :: wind, k_o2, sc_o2, k660
       real(rk) :: o2_sat, o2_flux
       real(rk) :: ice_fraction, open_water
 
@@ -130,34 +128,39 @@ contains
       real(rk) :: ln_cstar
       real(rk) :: o2_ml_l
 
-      real(rk), parameter :: ml_per_mol = 22391.6_rk
+      real(rk), parameter :: ml_per_mol  = 22391.6_rk
       real(rk), parameter :: sec_per_day = 86400.0_rk
+      real(rk), parameter :: cmh_to_ms   = 1.0_rk / (100.0_rk * 3600.0_rk)
 
       _SURFACE_LOOP_BEGIN_
 
          _GET_(self%id_o2,   o2)
          _GET_(self%id_temp, temp)
          _GET_(self%id_sal,  sal)
-         _GET_HORIZONTAL_(self%id_k660, k660)
-        if (self%apply_ice_cover) then
+
+         _GET_SURFACE_(self%id_wind, wind)       ! m s-1
+         if (self%apply_ice_cover) then
             _GET_SURFACE_(self%id_ice_fraction, ice_fraction)
-        else
+         else
             ice_fraction = 0.0_rk
-        end if
+         end if
 
          ice_fraction = min(max(ice_fraction, 0.0_rk), 1.0_rk)
          open_water   = 1.0_rk - ice_fraction
 
          ! --------------------------------------------------------------
          ! Schmidt number for uptake of O2 in seawater
-         ! Least squares fourth-order polynomial fit of Schmidt number versus temperature for seawater (35‰) at 
+         ! Least squares fourth-order polynomial fit of Schmidt number versus temperature for seawater at 
          ! temperatures from –2°C to 40°C.
          ! Wanninkhof (2014), Relationship between wind speed and gas exchange over the ocean revisited
          ! --------------------------------------------------------------
-         sc_o2 = 1920.4_rk - 135.6_rk*temp + 5.2121_rk*temp*temp &
+         sc_o2 = 1920.4_rk - 135.6_rk*temp + 5.2122_rk*temp*temp &
                 - 0.10939_rk*temp**3 + 9.3777e-4_rk*temp**4
 
-         !sc_o2 = max(sc_o2, 1.0_rk)
+         ! Gas transfer velocity at Sc = 660, Wanninkhof (2014)
+         ! k660 [cm h-1] = 0.251 ws^2
+         k660 = 0.251_rk * wind * wind
+         k660 = k660 * cmh_to_ms    ! convert to m s-1
 
          ! Oxygen exchange velocity (m/s)
          k_o2 = k660 * (660.0_rk / sc_o2)**0.5_rk
