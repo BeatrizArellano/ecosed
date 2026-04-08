@@ -113,7 +113,7 @@ contains
       real(rk) :: fT, fI, fO2
       real(rk) :: nit, o2_cons_nit, alk_change
 
-      real(rk), parameter :: secs_pr_day  = 86400.0_rk
+      real(rk), parameter :: secs_per_day  = 86400.0_rk
       real(rk), parameter :: o2_nit_thr   = 2.0_rk     ! O2 Threshold to reduce nitrification rapidly
       real(rk), parameter :: o2_nit_width = 0.2_rk
       real(rk), parameter :: o2_per_n_nit = 2.0_rk     ! 2 mol O2 per mol of NH4
@@ -164,7 +164,7 @@ contains
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_change)
 
          ! Diagnostic variables
-         _SET_DIAGNOSTIC_(self%id_nit, nit * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_nit, nit * secs_per_day)
 
       _LOOP_END_
 
