@@ -1,6 +1,7 @@
 add_library(fabm_models_ecosed OBJECT
             model_library.F90
             src/carbonate_chemistry.F90
+            src/carbonate_system.F90
             src/gas_exchange.F90
             src/molecular_diff.F90
             src/nitrogen.F90
