@@ -97,7 +97,6 @@ contains
    !   -1.9 <= T <= 40 °C,  0 <= S <= 42 PSU
    !
    ! O2 saturation follows García and Gordon (1992),
-   ! Based on the MEDUSA2.0 implementation.
    ! Air-sea exchange is scaled from k660 using the
    ! Schmidt number for O2, with positive flux defined
    ! into the ocean.
