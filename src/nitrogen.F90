@@ -74,7 +74,7 @@ contains
       call self%set_variable_property(self%id_no3, 'm1', m1_NO3)
 
       ! --- NH4 ---
-      call self%register_state_variable(self%id_nh4, 'nh4', 'mmol m-3', 'Dissolved Ammonium', initial_value=5.0_rk, minimum=0.0_rk, no_river_dilution=.true.)
+      call self%register_state_variable(self%id_nh4, 'nh4', 'mmol m-3', 'Dissolved Ammonium', initial_value=0.03_rk, minimum=0.0_rk, no_river_dilution=.true.)
       call self%set_variable_property(self%id_nh4, 'is_solute', .true.)
       call self%set_variable_property(self%id_nh4, 'diff_method', DIFF_ION_LINEAR)
       call self%set_variable_property(self%id_nh4, 'm0', m0_NH4)
@@ -82,7 +82,7 @@ contains
 
       ! --- PO4 ---
       ! Phosphate is defined here as it varies with N depending on stoichiometry
-      call self%register_state_variable(self%id_po4, 'po4', 'mmol m-3', 'Dissolved Phosphate', initial_value=0.3125_rk, minimum=0.0_rk, no_river_dilution=.true.)
+      call self%register_state_variable(self%id_po4, 'po4', 'mmol m-3', 'Dissolved Phosphate', initial_value=0.36_rk, minimum=0.0_rk, no_river_dilution=.true.)
       call self%set_variable_property(self%id_po4, 'is_solute', .true.)
       call self%set_variable_property(self%id_po4, 'diff_method', DIFF_ION_LINEAR)
       call self%set_variable_property(self%id_po4, 'm0', m0_PO4)
