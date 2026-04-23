@@ -50,6 +50,7 @@ module pelagic_ecosystem
       ! --- Parameters
       real(rk) :: mu_max                 ! Maximum phytoplankton growth rate at reference temperature
       real(rk) :: k_nh4, k_no3           ! Half-saturation constants for NH4 and NO3 uptake
+      real(rk) :: k_po4                  ! Half-saturation constant for phosphate uptake
       real(rk) :: g_max, k_g
       real(rk) :: m_phy, m_zoo2
 
@@ -90,6 +91,7 @@ contains
       call self%get_parameter(self%mu_max,'mu_max','d-1','max specific phyto growth rate', default=1.0_rk, scale_factor=d_per_s)
       call self%get_parameter(self%k_nh4, 'k_nh4', 'mmol m-3', 'Half-saturation constant for ammonium uptake', default=0.2_rk)
       call self%get_parameter(self%k_no3, 'k_no3', 'mmol m-3', 'Half-saturation constant for nitrate uptake', default=0.5_rk)
+      call self%get_parameter(self%k_po4, 'k_po4', 'mmol m-3', 'Half-saturation constant for phosphate uptake', default=0.03_rk)
 
       call self%get_parameter(self%photoacclimation, 'photoacclimation', '-','Enable chlorophyll photoacclimation', default=.false.)
       call self%get_parameter(self%alpha_chl,'alpha_chl','mmolC mgChl-1 (W m-2)-1 d-1', 'Chlorophyll-specific initial slope of P-I curve', default=0.7_rk, scale_factor=d_per_s)
@@ -169,12 +171,12 @@ contains
 
       real(rk)            :: phy, chl, zoo
       real(rk)            :: chl_diag
-      real(rk)            :: no3, nh4
+      real(rk)            :: no3, nh4, po4
       real(rk)            :: par, temp, phi
 
-      real(rk)            :: fN, fT, mu_T, alphaI
+      real(rk)            :: fN, fnut, fT, mu_T, alphaI
       real(rk)            :: dno3, dnh4, dpo4
-      real(rk)            :: lim_nh4, lim_no3, denom_n
+      real(rk)            :: lim_nh4, lim_no3, denom_n, lim_po4
       real(rk)            :: tpp, new_prod, reg_prod
       real(rk)            :: theta, cphy, fch, jden
       real(rk)            :: chl_prod, chl_loss
@@ -204,6 +206,7 @@ contains
 
          _GET_(self%id_no3, no3)
          _GET_(self%id_nh4, nh4)
+         _GET_(self%id_po4, po4)
          _GET_(self%id_phy, phy)
          if (self%photoacclimation) then
             _GET_(self%id_chl, chl)
@@ -247,6 +250,11 @@ contains
 
             fN = lim_no3 + lim_nh4
 
+            ! PO4 Monod limitation
+            lim_po4 = po4 / (self%k_po4 + po4)
+            ! Combined nutrient limitation
+            fnut = min(fN, lim_po4)
+
             ! --- Temperature dependence ---
             ! Eppley's (1972) exponential scaling of metabolic rates with temperature.
             ! Sets the temperature-dependent maximum growth rate.
@@ -286,7 +294,7 @@ contains
             ! transitioning between light-limited (alphaI) and temperature-limited (mu_T) growth.
             ! The resulting N-based production is further reduced by total nitrogen limitation fN.
             jden = sqrt(mu_T*mu_T + alphaI*alphaI + eps)
-            tpp = (mu_T * alphaI / jden) * fN * phy
+            tpp = (mu_T * alphaI / jden) * fnut * phy
 
             ! New and regenerated production
             ! Partition total phytoplankton production into NO3-supported (new) and NH4-supported
@@ -300,7 +308,7 @@ contains
             if (self%photoacclimation) then
                fch = mu_T / jden                                           ! Light-control term for chlorophyll synthesis
                ! Chl production enhanced under low-light while constrained by nutrient availability
-               chl_prod = (self%theta_chl_max * fch * fN / theta) * (tpp * self%c_to_n_phy) 
+               chl_prod = (self%theta_chl_max * fch * fnut / theta) * (tpp * self%c_to_n_phy) 
             end if
 
             !-------------------------------------------------------------------
