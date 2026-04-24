@@ -60,10 +60,7 @@ contains
       class(type_oxygen), intent(inout), target :: self
       integer,            intent(in)            :: configunit
 
-
       call self%get_parameter(self%apply_ice_cover, 'apply_ice_cover', '-', 'Reduce gas exchange by sea-ice fraction', default=.false.)
-
-      call self%register_implemented_routines((/source_do_surface/))
 
       ! Oxygen
       call self%register_state_variable(self%id_o2, 'o2', 'mmol m-3', 'Dissolved oxygen', initial_value=300.0_rk, minimum=0.0_rk)
@@ -83,8 +80,8 @@ contains
       end if
       
       ! Diagnostics
-      call self%register_diagnostic_variable(self%id_o2sat,  'o2_sat', 'mmol m-3', 'Oxygen saturation concentration', source=source_do_surface)
-      call self%register_diagnostic_variable(self%id_o2flux, 'o2_flux', 'mmol m-2 d-1', 'Air-sea oxygen flux, positive into ocean', source=source_do_surface)
+      call self%register_diagnostic_variable(self%id_o2sat,  'o2_sat', 'mmol m-3', 'Oxygen saturation concentration')
+      call self%register_diagnostic_variable(self%id_o2flux, 'o2_flux', 'mmol m-2 d-1', 'Air-sea oxygen flux, positive into ocean')
 
    end subroutine initialize
 
