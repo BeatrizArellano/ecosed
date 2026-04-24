@@ -78,8 +78,6 @@ contains
       class(type_carbonate_chemistry), intent(inout), target :: self
       integer,                         intent(in)            :: configunit
 
-      call self%register_implemented_routines((/source_do, source_do_surface/))
-
       ! ---------------- State variables ----------------
       ! --- DIC ---
       call self%register_state_variable(self%id_dic, 'dic', 'mmol m-3', 'Dissolved inorganic carbon', initial_value=2100.0_rk, minimum=0.0_rk, &
@@ -131,7 +129,7 @@ contains
       call self%register_surface_diagnostic_variable(self%id_pco2_sea, 'pco2_sea',     'uatm',       'Surface ocean pCO2')
       call self%register_surface_diagnostic_variable(self%id_delta_pco2, 'delta_pco2', 'uatm',       'Delta pCO2')
 
-      ! Dependencies on diagnostic variables to retrieve its latest values
+      ! Dependencies on diagnostic variables to retrieve its latest values computed by this module
       call self%register_dependency(self%id_hplus_prev, 'hplus', 'mmol m-3', 'Previous hydrogen ion concentration')
       call self%register_dependency(self%id_co2_wat,    'co2star', 'mmol C m-3',   'Dissolved CO2* concentration (CO2+H2CO3)')
 
