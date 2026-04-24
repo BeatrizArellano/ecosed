@@ -53,8 +53,6 @@ contains
       class(type_gas_exchange), intent(inout), target :: self
       integer,                  intent(in)            :: configunit
 
-      call self%register_implemented_routines((/source_do_surface/))
-
       ! Parameterisation choice:
       !   1 = Nightingale et al. (2000)
       !   2 = OCMIP-2
@@ -67,7 +65,7 @@ contains
       call self%register_dependency(self%id_wind, standard_variables%wind_speed)
 
       ! Gas exchange velocity at Sc = 660 [m s-1]
-      call self%register_diagnostic_variable(self%id_k660, 'k660', 'm s-1', 'Gas exchange velocity normalized to Schmidt number 660', source=source_do_surface)
+      call self%register_diagnostic_variable(self%id_k660, 'k660', 'm s-1', 'Gas exchange velocity normalized to Schmidt number 660')
    end subroutine initialize
 
 
