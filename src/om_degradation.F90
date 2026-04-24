@@ -43,6 +43,7 @@ module om_degradation
       real(rk) :: o2_per_c
       real(rk) :: k_o2_aer
       real(rk) :: ki_o2_redox
+      real(rk) :: o2_thr_redox
       real(rk) :: k_no3_denit 
       real(rk) :: atten
 
@@ -84,6 +85,7 @@ contains
 
       call self%get_parameter(self%k_o2_aer, 'k_o2_aer', 'mmol m-3', 'Half-saturation constant for O2 limitation in aerobic remineralisation', default=3.0_rk, minimum=eps)
       call self%get_parameter(self%ki_o2_redox, 'ki_o2_redox', 'mmol m-3', 'Half-saturation constant for O2 inhibition in suboxic remineralisation pathways', default=10.0_rk, minimum=eps)
+      call self%get_parameter(self%o2_thr_redox, 'o2_thr_redox', 'mmol m-3', 'O2 threshold below which suboxic/anoxic remineralisation pathways are allowed', default=10.0_rk, minimum=0.0_rk)
       call self%get_parameter(self%k_no3_denit, 'k_no3_denit', 'mmol m-3', 'Half-saturation constant for NO3 limitation in denitrification', default=30.0_rk, minimum=eps)
 
       call self%get_parameter(self%o2_per_c, 'o2_per_c', 'mol O2 mol C-1', 'Effective O2 consumed per mol organic C remineralised aerobically', default=1.3_rk)
@@ -212,7 +214,13 @@ contains
          faer = o2 / (self%k_o2_aer + o2)
 
          ! O2 inhibition of suboxic/anoxic remineralisation pathways.
-         fi_o2_redox = self%ki_o2_redox / (self%ki_o2_redox + o2)
+         ! ki_o2_redox controls the smooth inhibition below the redox threshold.
+         ! o2_thr_redox is an explicit threshold: above it, suboxic/anoxic pathways are inhibited.
+         if (o2 <= self%o2_thr_redox) then
+            fi_o2_redox = self%ki_o2_redox / (self%ki_o2_redox + o2)
+         else
+            fi_o2_redox = 0.0_rk
+         end if
 
          ! NO3 limitation for denitrification and inhibition by O2.
          ! Denitrification requires both low-O2 conditions and NO3 availability.
