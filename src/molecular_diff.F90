@@ -29,6 +29,10 @@ module molecular_diff
     real(rk), parameter, public :: m0_PO4 = 2.62_rk
     real(rk), parameter, public :: m1_PO4 = 0.143_rk
 
+    ! Mn2+ (method DIFF_ION_LINEAR)   Boudreau (1997) Table 4.7
+    real(rk), parameter, public :: m0_Mn2 = 3.18_rk
+    real(rk), parameter, public :: m1_Mn2 = 0.155_rk
+
     !--- Carbonate chemistry
     ! CO2   (method DIFF_O2CO2_AB)
     ! Eq. 4.59 (Boudreau 1997)
