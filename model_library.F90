@@ -3,7 +3,7 @@ module ecosed_model_library
    use fabm_types, only: type_base_model_factory, type_base_model
 
    use carbonate_chemistry
-   use gas_exchange
+   use manganese
    use nitrogen
    use om_degradation
    use oxygen
@@ -30,7 +30,7 @@ contains
 
       select case (name)
          case ('carbonate_chemistry'); allocate (type_carbonate_chemistry::model)
-         case ('gas_exchange');        allocate (type_gas_exchange::model)
+         case ('manganese');           allocate (type_manganese::model)
          case ('nitrogen');            allocate (type_nitrogen::model)
          case ('om_degradation');      allocate (type_om_degradation::model)
          case ('oxygen');              allocate (type_oxygen::model)
