@@ -13,9 +13,10 @@ module om_degradation
       type(type_state_variable_id) :: id_pom_l, id_pom_s, id_pom_r
 
       ! --- Couplings
-      type(type_state_variable_id) :: id_no3, id_nh4
-      type(type_state_variable_id) :: id_po4
       type(type_state_variable_id) :: id_o2
+      type(type_state_variable_id) :: id_no3, id_nh4
+      type(type_state_variable_id) :: id_po4      
+      type(type_state_variable_id) :: id_mn2, id_mno2
 
       !--- Optional Coupling
       type(type_state_variable_id) :: id_dic, id_alk      
@@ -30,6 +31,14 @@ module om_degradation
       type(type_diagnostic_variable_id) :: id_total_pom
       type(type_diagnostic_variable_id) :: id_o2_cons_rem
       type(type_diagnostic_variable_id) :: id_n_loss_denit
+      type(type_diagnostic_variable_id) :: id_rem_aer
+      type(type_diagnostic_variable_id) :: id_rem_denit
+      type(type_diagnostic_variable_id) :: id_rem_mn
+      type(type_diagnostic_variable_id) :: id_mno2_cons_mn
+      type(type_diagnostic_variable_id) :: id_mn2_prod_mn
+      type(type_diagnostic_variable_id) :: id_alk_prod_aer
+      type(type_diagnostic_variable_id) :: id_alk_prod_denit
+      type(type_diagnostic_variable_id) :: id_alk_prod_mn
 
       ! --- Parameters
       real(rk) :: frac_lab, frac_semi, frac_ref
@@ -45,6 +54,7 @@ module om_degradation
       real(rk) :: ki_o2_redox
       real(rk) :: o2_thr_redox
       real(rk) :: k_no3_denit 
+      real(rk) :: k_mno2_red
       real(rk) :: atten
 
    contains
@@ -87,6 +97,7 @@ contains
       call self%get_parameter(self%ki_o2_redox, 'ki_o2_redox', 'mmol m-3', 'Half-saturation constant for O2 inhibition in suboxic remineralisation pathways', default=10.0_rk, minimum=eps)
       call self%get_parameter(self%o2_thr_redox, 'o2_thr_redox', 'mmol m-3', 'O2 threshold below which suboxic/anoxic remineralisation pathways are allowed', default=10.0_rk, minimum=0.0_rk)
       call self%get_parameter(self%k_no3_denit, 'k_no3_denit', 'mmol m-3', 'Half-saturation constant for NO3 limitation in denitrification', default=30.0_rk, minimum=eps)
+      call self%get_parameter(self%k_mno2_red, 'k_mno2_red', 'mmol m-3', 'Half-saturation constant for MnO2 limitation in Mn oxide reduction', default=42.4_rk, minimum=eps)
 
       call self%get_parameter(self%o2_per_c, 'o2_per_c', 'mol O2 mol C-1', 'Effective O2 consumed per mol organic C remineralised aerobically', default=1.3_rk)
       call self%get_parameter(self%atten, 'atten', 'm2 mmol-1', 'specific light extinction of POM', default=0.03_rk)
@@ -113,6 +124,8 @@ contains
       call self%register_state_dependency(self%id_nh4, 'nh4', 'mmol m-3', 'Dissolved ammonium', required=.true.)
       call self%register_state_dependency(self%id_po4, 'po4', 'mmol P m-3', 'Dissolved phosphate', required=.true.)
       call self%register_state_dependency(self%id_o2,  'o2',  'mmol m-3', 'Dissolved oxygen', required=.true.)
+      call self%register_state_dependency(self%id_mn2,  'mn2',  'mmol m-3', 'Dissolved Mn(II)', required=.false.)
+      call self%register_state_dependency(self%id_mno2, 'mno2', 'mmol m-3', 'Particulate Mn(IV) oxide', required=.false.)
       call self%register_state_dependency(self%id_dic, 'dic', 'mmol m-3', 'Total dissolved inorganic carbon', required=.false.)
       call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.) 
 
@@ -126,6 +139,16 @@ contains
       call self%register_diagnostic_variable(self%id_total_pom, 'total_pom', 'mmol m-3', 'Total particulate organic matter')
       call self%register_diagnostic_variable(self%id_o2_cons_rem, 'O2_CONS_REM', 'mmol m-3 d-1', 'O2 consumption by aerobic remineralisation')
       call self%register_diagnostic_variable(self%id_n_loss_denit, 'NLOSS_DENIT', 'mmol m-3 d-1', 'N loss to N2 by denitrification')
+      call self%register_diagnostic_variable(self%id_rem_aer,   'REM_AER',   'mmol N m-3 d-1', 'Aerobic remineralisation rate')
+      call self%register_diagnostic_variable(self%id_rem_denit, 'REM_DENIT', 'mmol N m-3 d-1', 'Denitrification remineralisation rate')
+      call self%register_diagnostic_variable(self%id_rem_mn,    'REM_MN',    'mmol N m-3 d-1', 'Mn oxide reduction remineralisation rate')
+
+      call self%register_diagnostic_variable(self%id_mno2_cons_mn, 'MNO2_CONS_MN', 'mmol m-3 d-1', 'MnO2 consumption by Mn oxide reduction')
+      call self%register_diagnostic_variable(self%id_mn2_prod_mn,  'MN2_PROD_MN',  'mmol m-3 d-1', 'Mn2 production by Mn oxide reduction')
+
+      call self%register_diagnostic_variable(self%id_alk_prod_aer,   'ALK_PROD_AER',   'mmol eq m-3 d-1', 'Alkalinity production by aerobic remineralisation')
+      call self%register_diagnostic_variable(self%id_alk_prod_denit, 'ALK_PROD_DENIT', 'mmol eq m-3 d-1', 'Alkalinity production by denitrification')
+      call self%register_diagnostic_variable(self%id_alk_prod_mn,    'ALK_PROD_MN',    'mmol eq m-3 d-1', 'Alkalinity production by Mn oxide reduction')
 
    end subroutine initialize
 
@@ -138,16 +161,18 @@ contains
       real(rk) :: phi, phi_s                     ! Porosity
       real(rk) :: p2d, d2p
       real(rk) :: o2, no3, fT
+      real(rk) :: mn2, mno2
       logical  :: is_water
       ! Pathway limiting/inhibition functions
       real(rk) :: fi_o2_redox
-      real(rk) :: fsum, faer, fdenit
+      real(rk) :: fsum, faer, fdenit, fmn
 
       ! Pathway-specific remineralisation rates
       real(rk) :: rem_pom_l_aer, rem_pom_s_aer, rem_pom_r_aer
       real(rk) :: rem_pom_l_denit, rem_pom_s_denit, rem_pom_r_denit
+      real(rk) :: rem_pom_l_mn, rem_pom_s_mn, rem_pom_r_mn
       real(rk) :: rem_pom_l_tot, rem_pom_s_tot, rem_pom_r_tot
-      real(rk) :: rem_aer_total, rem_denit_total, rem_total
+      real(rk) :: rem_aer_total, rem_denit_total, rem_mn_total, rem_total
 
       ! Stoichiometric products and sinks
       real(rk) :: dic_prod_rem
@@ -156,7 +181,10 @@ contains
       real(rk) :: n_loss_denit
       real(rk) :: nh4_prod
       real(rk) :: po4_prod_rem
-      real(rk) :: alk_prod_aer, alk_prod_denit, alk_prod_tot
+      real(rk) :: c_remin_mn, mno2_cons_mn, mn2_prod_mn
+      real(rk) :: alk_prod_aer, alk_prod_denit, alk_prod_mn, alk_prod_tot
+
+      logical  :: use_mn
 
       real(rk), parameter :: secs_pr_day = 86400.0_rk
       real(rk), parameter :: eps_phi     = 1.0e-7_rk      
@@ -170,6 +198,15 @@ contains
          _GET_(self%id_pom_prod_n, pom_prod_n)
          _GET_(self%id_o2, o2)
          _GET_(self%id_no3, no3)
+
+         use_mn = _AVAILABLE_(self%id_mn2) .and. _AVAILABLE_(self%id_mno2)
+         if (use_mn) then
+            _GET_(self%id_mn2,  mn2)
+            _GET_(self%id_mno2, mno2)
+         else
+            mn2  = 0.0_rk
+            mno2 = 0.0_rk
+         end if
 
          !--------------------------------------------------------------------
          !  Conversion factors for cross-phase reactions (corrected by porosity)
@@ -226,8 +263,15 @@ contains
          ! Denitrification requires both low-O2 conditions and NO3 availability.
          fdenit = fi_o2_redox * no3 / (self%k_no3_denit + no3)
 
+         ! MnO2 limitation for Mn oxide reduction and inhibition by O2
+         if (use_mn) then
+            fmn = fi_o2_redox * mno2 / (self%k_mno2_red + mno2)
+         else
+            fmn = 0.0_rk
+         end if
+
          ! Combined activity (demand) of all remineralisation pathways under current redox conditions.
-         fsum = faer + fdenit
+         fsum = faer + fdenit + fmn
 
          ! If the combined activity exceeds the maximum potential, rescale pathway factors so that
          ! total remineralisation does not exceed the intrinsic first-order degradation potential (k * POM).
@@ -240,6 +284,7 @@ contains
             ! After rescaling, the limiting functions represent fractions of total remineralisation.
             faer   = faer   / fsum
             fdenit = fdenit / fsum
+            fmn    = fmn    / fsum
          end if         
 
          !-------------------------------------------------------------------------
@@ -278,10 +323,6 @@ contains
          rem_pom_s_denit = self%k_remin_pom_s * fdenit * pom_s
          rem_pom_r_denit = self%k_remin_pom_r * fdenit * pom_r
 
-         !rem_pom_l_denit = 0.0_rk
-         !rem_pom_s_denit = 0.0_rk
-         !rem_pom_r_denit = 0.0_rk
-
          ! NO3 consumption during denitrification 
          ! CH2O(NH3)x(H3PO4)y + 0.8 NO3- -> 0.2 CO2 + 0.4 N2 + 0.8 HCO3- + x NH3 + y H3PO4 + 0.6 H2O
          ! The factor 0.8 gives the NO3 demand per mol organic C remineralised by denitrification.
@@ -305,6 +346,48 @@ contains
          alk_prod_denit = rem_pom_l_denit * (0.8_rk*self%c_to_n_pom_l + 1.0_rk - 1.0_rk/self%n_to_p_pom_l)  &
                         + rem_pom_s_denit * (0.8_rk*self%c_to_n_pom_s + 1.0_rk - 1.0_rk/self%n_to_p_pom_s)  &
                         + rem_pom_r_denit * (0.8_rk*self%c_to_n_pom_r + 1.0_rk - 1.0_rk/self%n_to_p_pom_r) 
+
+         ! ------------------------------------------------------------------------
+         !    Mn-Oxide Reduction
+         ! ------------------------------------------------------------------------
+         ! Organic matter degradation coupled to Mn(IV) oxide reduction.
+         ! Equation R3 in Middelburg et al. (2020):
+         ! (CH2O)(NH3)n/c(H3PO4)p/c + 2 MnO2 + 4H+ 
+         !    -> CO2 + n/c NH3 + p/c H3PO4 + 2 Mn2+ + 3H2O
+         !
+         ! Per mol organic C remineralised:
+         !   MnO2 consumption = 2 per mol C
+         !   Mn2 production   = 2 per mol C
+         !   DIC production   = 1 per mol C
+         !   TA production    = 4 + n/c - p/c per mol C
+         rem_pom_l_mn = 0.0_rk; rem_pom_s_mn = 0.0_rk; rem_pom_r_mn = 0.0_rk
+         rem_mn_total = 0.0_rk; mno2_cons_mn = 0.0_rk; mn2_prod_mn  = 0.0_rk; alk_prod_mn  = 0.0_rk
+
+         ! MnO2 reduction rate for each POM pool, limited by MnO2 and inhibited by O2.
+         rem_pom_l_mn = self%k_remin_pom_l * fmn * pom_l                ! mmol N m⁻3 s⁻1
+         rem_pom_s_mn = self%k_remin_pom_s * fmn * pom_s
+         rem_pom_r_mn = self%k_remin_pom_r * fmn * pom_r
+
+         rem_mn_total = rem_pom_l_mn + rem_pom_s_mn + rem_pom_r_mn      ! Total degradation rate via MnO2 reduction
+
+         ! POM is stored in N units, so C remineralisation is C:N * rem_pom_*_mn. (Converting to mmol C m⁻3 s-1)
+         c_remin_mn = self%c_to_n_pom_l * rem_pom_l_mn &
+                    + self%c_to_n_pom_s * rem_pom_s_mn &
+                    + self%c_to_n_pom_r * rem_pom_r_mn
+
+         ! MnO2 is particulate and stored on the solid fraction, like POM.
+         ! Therefore this sink remains in solid-volume units.
+         mno2_cons_mn = 2.0_rk * c_remin_mn
+
+         ! Mn2 is dissolved and enters porewater, so convert with p2d.
+         mn2_prod_mn = p2d * 2.0_rk * c_remin_mn
+
+         ! Alkalinity generation by MnO2 reduction.
+         ! Per mol N remineralised:
+         !   4*C:N + 1 - 1/(N:P)
+         alk_prod_mn = rem_pom_l_mn * (4.0_rk*self%c_to_n_pom_l + 1.0_rk - 1.0_rk/self%n_to_p_pom_l) &
+                     + rem_pom_s_mn * (4.0_rk*self%c_to_n_pom_s + 1.0_rk - 1.0_rk/self%n_to_p_pom_s) &
+                     + rem_pom_r_mn * (4.0_rk*self%c_to_n_pom_r + 1.0_rk - 1.0_rk/self%n_to_p_pom_r)     
          
          ! ------------------------------------------------------------------------
          !    Total remineralisation rates and products
@@ -312,12 +395,12 @@ contains
          ! Total remineralisation rates summed across POM pools and pathways.
          rem_aer_total   = rem_pom_l_aer   + rem_pom_s_aer   + rem_pom_r_aer
          rem_denit_total = rem_pom_l_denit + rem_pom_s_denit + rem_pom_r_denit
-         rem_total       = rem_aer_total + rem_denit_total
+         rem_total       = rem_aer_total + rem_denit_total + rem_mn_total
 
          ! Total remineralisation rate for each POM pool.
-         rem_pom_l_tot = rem_pom_l_aer + rem_pom_l_denit
-         rem_pom_s_tot = rem_pom_s_aer + rem_pom_s_denit
-         rem_pom_r_tot = rem_pom_r_aer + rem_pom_r_denit
+         rem_pom_l_tot = rem_pom_l_aer + rem_pom_l_denit + rem_pom_l_mn
+         rem_pom_s_tot = rem_pom_s_aer + rem_pom_s_denit + rem_pom_s_mn
+         rem_pom_r_tot = rem_pom_r_aer + rem_pom_r_denit + rem_pom_r_mn
 
          ! NH4 production during remineralisation.
          ! For each mol N of remineralised organic matter, 1 mol of NH4 is produced.
@@ -326,21 +409,21 @@ contains
 
          ! PO4 production
          po4_prod_rem = p2d * (rem_pom_l_tot / self%n_to_p_pom_l  &
-                         + rem_pom_s_tot / self%n_to_p_pom_s  &
-                         + rem_pom_r_tot / self%n_to_p_pom_r)
+                            + rem_pom_s_tot / self%n_to_p_pom_s  &
+                            + rem_pom_r_tot / self%n_to_p_pom_r)
 
          ! DIC production is computed from total remineralised organic matter using the C:N ratio of each POM pool.
          ! 1 mol of DIC is produced per mol of C remineralised in OM. 
-         dic_prod_rem = self%c_to_n_pom_l * (rem_pom_l_aer  + rem_pom_l_denit) &
-                      + self%c_to_n_pom_s * (rem_pom_s_aer  + rem_pom_s_denit) &
-                      + self%c_to_n_pom_r * (rem_pom_r_aer  + rem_pom_r_denit)    
+         dic_prod_rem = self%c_to_n_pom_l * rem_pom_l_tot &
+                      + self%c_to_n_pom_s * rem_pom_s_tot &
+                      + self%c_to_n_pom_r * rem_pom_r_tot   
 
          ! Convert DIC production from solid-phase to porewater-volume units.           
          dic_prod_rem = p2d * dic_prod_rem        
 
          ! Alkalinity
-         ! Converts PO4 production from solid-phase volume units to porewater concentration using p2d 
-         alk_prod_tot = p2d * (alk_prod_aer + alk_prod_denit)
+         ! Convert alkalinity production from solid-phase volume units to porewater-volume units.
+         alk_prod_tot = p2d * (alk_prod_aer + alk_prod_denit + alk_prod_mn)
          
 
          !-------------------------------------------------------------------------
@@ -356,6 +439,10 @@ contains
          _ADD_SOURCE_(self%id_no3, -no3_cons_denit)
          _ADD_SOURCE_(self%id_o2,  -o2_cons_rem)
          _ADD_SOURCE_(self%id_po4, po4_prod_rem) 
+         if (use_mn) then
+            _ADD_SOURCE_(self%id_mno2, -mno2_cons_mn)
+            _ADD_SOURCE_(self%id_mn2,   mn2_prod_mn)
+         end if
 
          if (_AVAILABLE_(self%id_dic)) _ADD_SOURCE_(self%id_dic, dic_prod_rem)         
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_prod_tot)        
@@ -364,6 +451,16 @@ contains
          _SET_DIAGNOSTIC_(self%id_total_pom, pom_l + pom_s + pom_r)
          _SET_DIAGNOSTIC_(self%id_o2_cons_rem, o2_cons_rem * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_n_loss_denit, n_loss_denit * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_rem_aer,   rem_aer_total   * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_rem_denit, rem_denit_total * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_rem_mn,    rem_mn_total    * secs_pr_day)
+
+         _SET_DIAGNOSTIC_(self%id_mno2_cons_mn, mno2_cons_mn * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_mn2_prod_mn,  mn2_prod_mn  * secs_pr_day)
+
+         _SET_DIAGNOSTIC_(self%id_alk_prod_aer,   p2d * alk_prod_aer   * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_alk_prod_denit, p2d * alk_prod_denit * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_alk_prod_mn,    p2d * alk_prod_mn    * secs_pr_day)
 
       _LOOP_END_
    end subroutine do
