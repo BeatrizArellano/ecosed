@@ -33,6 +33,16 @@ module molecular_diff
     real(rk), parameter, public :: m0_Mn2 = 3.18_rk
     real(rk), parameter, public :: m1_Mn2 = 0.155_rk
 
+    !Fe2+ (method DIFF_ION_LINEAR)   Boudreau (1997) Table 4.7
+    real(rk), parameter, public :: m0_Fe2 = 3.31_rk
+    real(rk), parameter, public :: m1_Fe2 = 0.150_rk
+
+    !SO4 2- and HS- (method DIFF_ION_LINEAR)   Boudreau (1997) Table 4.8
+    real(rk), parameter, public :: m0_SO4 = 4.88_rk
+    real(rk), parameter, public :: m1_SO4 = 0.232_rk
+    real(rk), parameter, public :: m0_HS = 10.4_rk
+    real(rk), parameter, public :: m1_HS = 0.273_rk
+
     !--- Carbonate chemistry
     ! CO2   (method DIFF_O2CO2_AB)
     ! Eq. 4.59 (Boudreau 1997)

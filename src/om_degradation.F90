@@ -17,6 +17,8 @@ module om_degradation
       type(type_state_variable_id) :: id_no3, id_nh4
       type(type_state_variable_id) :: id_po4      
       type(type_state_variable_id) :: id_mn2, id_mno2
+      type(type_state_variable_id) :: id_fe2, id_fe3ox
+      type(type_state_variable_id) :: id_so4, id_sulfide
 
       !--- Optional Coupling
       type(type_state_variable_id) :: id_dic, id_alk      
@@ -39,6 +41,14 @@ module om_degradation
       type(type_diagnostic_variable_id) :: id_alk_prod_aer
       type(type_diagnostic_variable_id) :: id_alk_prod_denit
       type(type_diagnostic_variable_id) :: id_alk_prod_mn
+      type(type_diagnostic_variable_id) :: id_rem_fe
+      type(type_diagnostic_variable_id) :: id_fe3ox_cons_fe
+      type(type_diagnostic_variable_id) :: id_fe2_prod_fe
+      type(type_diagnostic_variable_id) :: id_alk_prod_fe
+      type(type_diagnostic_variable_id) :: id_rem_so4
+      type(type_diagnostic_variable_id) :: id_so4_cons
+      type(type_diagnostic_variable_id) :: id_sulfide_prod
+      type(type_diagnostic_variable_id) :: id_alk_prod_so4
 
       ! --- Parameters
       real(rk) :: frac_lab, frac_semi, frac_ref
@@ -54,7 +64,13 @@ module om_degradation
       real(rk) :: ki_o2_redox
       real(rk) :: o2_thr_redox
       real(rk) :: k_no3_denit 
+      real(rk) :: ki_no3_redox
       real(rk) :: k_mno2_red
+      real(rk) :: ki_mno2_redox
+      real(rk) :: k_fe3ox_red
+      real(rk) :: ki_fe3ox_redox
+      real(rk) :: k_so4_red
+      real(rk) :: ki_so4_redox   
       real(rk) :: atten
 
    contains
@@ -98,6 +114,13 @@ contains
       call self%get_parameter(self%o2_thr_redox, 'o2_thr_redox', 'mmol m-3', 'O2 threshold below which suboxic/anoxic remineralisation pathways are allowed', default=10.0_rk, minimum=0.0_rk)
       call self%get_parameter(self%k_no3_denit, 'k_no3_denit', 'mmol m-3', 'Half-saturation constant for NO3 limitation in denitrification', default=30.0_rk, minimum=eps)
       call self%get_parameter(self%k_mno2_red, 'k_mno2_red', 'mmol m-3', 'Half-saturation constant for MnO2 limitation in Mn oxide reduction', default=42.4_rk, minimum=eps)
+      call self%get_parameter(self%k_fe3ox_red, 'k_fe3ox_red', 'mmol m-3', 'Half-saturation constant for Fe(III) oxide limitation in Fe oxide reduction', default=100.0_rk, minimum=eps)
+      call self%get_parameter(self%k_so4_red, 'k_so4_red', 'mmol m-3', 'Half-saturation constant for sulfate limitation in sulfate reduction', default=1000.0_rk, minimum=eps)
+
+      call self%get_parameter(self%ki_no3_redox, 'ki_no3_redox', 'mmol m-3', 'NO3 inhibition constant for lower-energy redox pathways', default=5.0_rk, minimum=eps)
+      call self%get_parameter(self%ki_mno2_redox, 'ki_mno2_redox', 'mmol m-3', 'MnO2 inhibition constant for lower-energy redox pathways', default=42.4_rk, minimum=eps)
+      call self%get_parameter(self%ki_fe3ox_redox, 'ki_fe3ox_redox', 'mmol m-3', 'Fe(III) oxide inhibition constant for lower-energy redox pathways', default=100.0_rk, minimum=eps)
+      call self%get_parameter(self%ki_so4_redox, 'ki_so4_redox', 'mmol m-3', 'SO4 inhibition constant for methanogenesis or lower-energy pathways', default=1000.0_rk, minimum=eps)
 
       call self%get_parameter(self%o2_per_c, 'o2_per_c', 'mol O2 mol C-1', 'Effective O2 consumed per mol organic C remineralised aerobically', default=1.3_rk)
       call self%get_parameter(self%atten, 'atten', 'm2 mmol-1', 'specific light extinction of POM', default=0.03_rk)
@@ -126,6 +149,11 @@ contains
       call self%register_state_dependency(self%id_o2,  'o2',  'mmol m-3', 'Dissolved oxygen', required=.true.)
       call self%register_state_dependency(self%id_mn2,  'mn2',  'mmol m-3', 'Dissolved Mn(II)', required=.false.)
       call self%register_state_dependency(self%id_mno2, 'mno2', 'mmol m-3', 'Particulate Mn(IV) oxide', required=.false.)
+      call self%register_state_dependency(self%id_fe2, 'fe2', 'mmol m-3', 'Dissolved Fe(II)', required=.false.)
+      call self%register_state_dependency(self%id_fe3ox, 'fe3ox', 'mmol m-3', 'Particulate Fe(III) oxides/hydroxides', required=.false.)
+      call self%register_state_dependency(self%id_so4, 'so4', 'mmol m-3', 'Dissolved sulfate', required=.false.)
+      call self%register_state_dependency(self%id_sulfide, 'sulfide', 'mmol m-3', 'Total dissolved sulfide', required=.false.)
+
       call self%register_state_dependency(self%id_dic, 'dic', 'mmol m-3', 'Total dissolved inorganic carbon', required=.false.)
       call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.) 
 
@@ -146,6 +174,16 @@ contains
       call self%register_diagnostic_variable(self%id_mno2_cons_mn, 'MNO2_CONS_MN', 'mmol m-3 d-1', 'MnO2 consumption by Mn oxide reduction')
       call self%register_diagnostic_variable(self%id_mn2_prod_mn,  'MN2_PROD_MN',  'mmol m-3 d-1', 'Mn2 production by Mn oxide reduction')
 
+      call self%register_diagnostic_variable(self%id_rem_fe, 'REM_FE', 'mmol N m-3 d-1', 'Fe oxide reduction remineralisation rate')
+      call self%register_diagnostic_variable(self%id_fe3ox_cons_fe, 'FE3OX_CONS_FE', 'mmol m-3 d-1', 'Fe(III) oxide consumption by Fe oxide reduction')
+      call self%register_diagnostic_variable(self%id_fe2_prod_fe, 'FE2_PROD_FE', 'mmol m-3 d-1', 'Fe2 production by Fe oxide reduction')
+      call self%register_diagnostic_variable(self%id_alk_prod_fe, 'ALK_PROD_FE', 'mmol eq m-3 d-1', 'Alkalinity production by Fe oxide reduction')
+
+      call self%register_diagnostic_variable(self%id_rem_so4, 'REM_SO4', 'mmol N m-3 d-1', 'Sulfate reduction remineralisation rate')
+      call self%register_diagnostic_variable(self%id_so4_cons, 'SO4_CONS', 'mmol m-3 d-1', 'Sulfate consumption')
+      call self%register_diagnostic_variable(self%id_sulfide_prod, 'SULFIDE_PROD', 'mmol m-3 d-1', 'Sulfide production')
+      call self%register_diagnostic_variable(self%id_alk_prod_so4, 'ALK_PROD_SO4', 'mmol eq m-3 d-1', 'Alkalinity production by sulfate reduction')
+
       call self%register_diagnostic_variable(self%id_alk_prod_aer,   'ALK_PROD_AER',   'mmol eq m-3 d-1', 'Alkalinity production by aerobic remineralisation')
       call self%register_diagnostic_variable(self%id_alk_prod_denit, 'ALK_PROD_DENIT', 'mmol eq m-3 d-1', 'Alkalinity production by denitrification')
       call self%register_diagnostic_variable(self%id_alk_prod_mn,    'ALK_PROD_MN',    'mmol eq m-3 d-1', 'Alkalinity production by Mn oxide reduction')
@@ -162,17 +200,25 @@ contains
       real(rk) :: p2d, d2p
       real(rk) :: o2, no3, fT
       real(rk) :: mn2, mno2
+      real(rk) :: fe2, fe3ox
+      real(rk) :: so4, sulfide
+
       logical  :: is_water
       ! Pathway limiting/inhibition functions
       real(rk) :: fi_o2_redox
-      real(rk) :: fsum, faer, fdenit, fmn
+      real(rk) :: fi_no3_redox
+      real(rk) :: fi_mno2_redox, fi_fe3ox_redox, fi_so4_redox
+      real(rk) :: fsum, faer, fdenit, fmn, ffe, fso4
 
       ! Pathway-specific remineralisation rates
       real(rk) :: rem_pom_l_aer, rem_pom_s_aer, rem_pom_r_aer
       real(rk) :: rem_pom_l_denit, rem_pom_s_denit, rem_pom_r_denit
       real(rk) :: rem_pom_l_mn, rem_pom_s_mn, rem_pom_r_mn
+      real(rk) :: rem_pom_l_fe, rem_pom_s_fe, rem_pom_r_fe
+      real(rk) :: rem_pom_l_so4, rem_pom_s_so4, rem_pom_r_so4
       real(rk) :: rem_pom_l_tot, rem_pom_s_tot, rem_pom_r_tot
-      real(rk) :: rem_aer_total, rem_denit_total, rem_mn_total, rem_total
+      real(rk) :: rem_aer_total, rem_denit_total, rem_mn_total, &
+                  rem_fe_total, rem_so4_total, rem_total
 
       ! Stoichiometric products and sinks
       real(rk) :: dic_prod_rem
@@ -182,9 +228,11 @@ contains
       real(rk) :: nh4_prod
       real(rk) :: po4_prod_rem
       real(rk) :: c_remin_mn, mno2_cons_mn, mn2_prod_mn
-      real(rk) :: alk_prod_aer, alk_prod_denit, alk_prod_mn, alk_prod_tot
+      real(rk) :: c_remin_fe, fe3ox_cons_fe, fe2_prod_fe
+      real(rk) :: c_remin_so4, so4_cons, sulfide_prod
+      real(rk) :: alk_prod_aer, alk_prod_denit, alk_prod_mn, alk_prod_fe, alk_prod_so4, alk_prod_tot
 
-      logical  :: use_mn
+      logical  :: use_mn, use_fe, use_so4
 
       real(rk), parameter :: secs_pr_day = 86400.0_rk
       real(rk), parameter :: eps_phi     = 1.0e-7_rk      
@@ -206,6 +254,24 @@ contains
          else
             mn2  = 0.0_rk
             mno2 = 0.0_rk
+         end if
+
+         use_fe = _AVAILABLE_(self%id_fe2) .and. _AVAILABLE_(self%id_fe3ox)
+         if (use_fe) then
+            _GET_(self%id_fe2,    fe2)
+            _GET_(self%id_fe3ox,  fe3ox)
+         else
+            fe2   = 0.0_rk
+            fe3ox = 0.0_rk
+         end if
+
+         use_so4 = _AVAILABLE_(self%id_so4) .and. _AVAILABLE_(self%id_sulfide)
+         if (use_so4) then
+            _GET_(self%id_so4, so4)
+            _GET_(self%id_sulfide, sulfide)
+         else
+            so4 = 0.0_rk
+            sulfide = 0.0_rk
          end if
 
          !--------------------------------------------------------------------
@@ -259,19 +325,69 @@ contains
             fi_o2_redox = 0.0_rk
          end if
 
+         ! -------------------------------------------------------------------------
+         ! Sequential redox inhibition factors.
+         !
+         ! The redox ladder is represented by allowing lower-energy pathways only
+         ! when higher-energy electron acceptors are depleted.
+         !
+         ! Sequence:
+         !   O2 -> NO3 -> MnO2 -> Fe(III) oxides -> SO4 -> CH4
+         ! -------------------------------------------------------------------------
+
+         ! Inhibition by nitrate: suppress Mn, Fe and sulfate reduction while NO3 is available.
+         fi_no3_redox = self%ki_no3_redox / (self%ki_no3_redox + no3)
+
+         ! Inhibition by MnO2: suppress Fe and sulfate reduction while MnO2 is available.
+         if (use_mn) then
+            fi_mno2_redox = self%ki_mno2_redox / (self%ki_mno2_redox + mno2)
+         else
+            fi_mno2_redox = 1.0_rk
+         end if
+
+         ! Inhibition by Fe(III) oxides: suppress sulfate reduction while Fe oxides are available.
+         if (use_fe) then
+            fi_fe3ox_redox = self%ki_fe3ox_redox / (self%ki_fe3ox_redox + fe3ox)
+         else
+            fi_fe3ox_redox = 1.0_rk
+         end if
+
+         ! Optional sulfate inhibition, useful later if you add methanogenesis.
+         if (use_so4) then
+            fi_so4_redox = self%ki_so4_redox / (self%ki_so4_redox + so4)
+         else
+            fi_so4_redox = 1.0_rk
+         end if
+
          ! NO3 limitation for denitrification and inhibition by O2.
          ! Denitrification requires both low-O2 conditions and NO3 availability.
          fdenit = fi_o2_redox * no3 / (self%k_no3_denit + no3)
 
-         ! MnO2 limitation for Mn oxide reduction and inhibition by O2
+         ! MnO2 reduction is suppressed by O2 and NO3.
          if (use_mn) then
-            fmn = fi_o2_redox * mno2 / (self%k_mno2_red + mno2)
+            fmn = fi_o2_redox * fi_no3_redox * mno2 / (self%k_mno2_red + mno2)
          else
             fmn = 0.0_rk
          end if
 
+         ! Fe(III) oxide reduction is suppressed by O2, NO3 and MnO2.
+         if (use_fe) then
+            ffe = fi_o2_redox * fi_no3_redox * fi_mno2_redox * fe3ox / (self%k_fe3ox_red + fe3ox)
+         else
+            ffe = 0.0_rk
+         end if
+
+         ! Sulfate reduction is suppressed by O2, NO3, MnO2 and Fe(III) oxides.
+         if (use_so4) then
+            fso4 = fi_o2_redox * fi_no3_redox * fi_mno2_redox * fi_fe3ox_redox &
+                 * so4 / (self%k_so4_red + so4)
+         else
+            fso4 = 0.0_rk
+         end if
+
+
          ! Combined activity (demand) of all remineralisation pathways under current redox conditions.
-         fsum = faer + fdenit + fmn
+         fsum = faer + fdenit + fmn + ffe + fso4
 
          ! If the combined activity exceeds the maximum potential, rescale pathway factors so that
          ! total remineralisation does not exceed the intrinsic first-order degradation potential (k * POM).
@@ -285,6 +401,8 @@ contains
             faer   = faer   / fsum
             fdenit = fdenit / fsum
             fmn    = fmn    / fsum
+            ffe    = ffe    / fsum
+            fso4   = fso4   / fsum
          end if         
 
          !-------------------------------------------------------------------------
@@ -363,7 +481,7 @@ contains
          rem_pom_l_mn = 0.0_rk; rem_pom_s_mn = 0.0_rk; rem_pom_r_mn = 0.0_rk
          rem_mn_total = 0.0_rk; mno2_cons_mn = 0.0_rk; mn2_prod_mn  = 0.0_rk; alk_prod_mn  = 0.0_rk
 
-         ! MnO2 reduction rate for each POM pool, limited by MnO2 and inhibited by O2.
+         ! MnO2 reduction rate for each POM pool, limited by MnO2 and inhibited by O2 and NO3.
          rem_pom_l_mn = self%k_remin_pom_l * fmn * pom_l                ! mmol N m⁻3 s⁻1
          rem_pom_s_mn = self%k_remin_pom_s * fmn * pom_s
          rem_pom_r_mn = self%k_remin_pom_r * fmn * pom_r
@@ -387,7 +505,94 @@ contains
          !   4*C:N + 1 - 1/(N:P)
          alk_prod_mn = rem_pom_l_mn * (4.0_rk*self%c_to_n_pom_l + 1.0_rk - 1.0_rk/self%n_to_p_pom_l) &
                      + rem_pom_s_mn * (4.0_rk*self%c_to_n_pom_s + 1.0_rk - 1.0_rk/self%n_to_p_pom_s) &
-                     + rem_pom_r_mn * (4.0_rk*self%c_to_n_pom_r + 1.0_rk - 1.0_rk/self%n_to_p_pom_r)     
+                     + rem_pom_r_mn * (4.0_rk*self%c_to_n_pom_r + 1.0_rk - 1.0_rk/self%n_to_p_pom_r)  
+                     
+         ! ------------------------------------------------------------------------
+         !    Fe-Oxide Reduction
+         ! ------------------------------------------------------------------------
+         ! Organic matter degradation via Fe(III) oxide reduction.
+         !
+         ! Written using Fe(OH)3 as the form of the reactive Fe(III)
+         ! oxide/hydroxide pool:
+         !
+         ! (CH2O)(NH3)n/c(H3PO4)p/c + 4 Fe(OH)3 + 7 CO2
+         !    -> 8 HCO3- + n/c NH3 + p/c H3PO4 + 4 Fe2+ + 3 H2O
+         !
+         ! Per mol organic C remineralised:
+         !   Fe3ox consumption = 4 per mol C
+         !   Fe2 production    = 4 per mol C
+         !   DIC production    = 1 per mol C
+         !   TA production     = 8 + n/c - p/c per mol C
+         rem_pom_l_fe = 0.0_rk; rem_pom_s_fe = 0.0_rk; rem_pom_r_fe = 0.0_rk
+         rem_fe_total = 0.0_rk; fe3ox_cons_fe = 0.0_rk; fe2_prod_fe = 0.0_rk
+         alk_prod_fe  = 0.0_rk
+
+         rem_pom_l_fe = self%k_remin_pom_l * ffe * pom_l
+         rem_pom_s_fe = self%k_remin_pom_s * ffe * pom_s
+         rem_pom_r_fe = self%k_remin_pom_r * ffe * pom_r
+
+         rem_fe_total = rem_pom_l_fe + rem_pom_s_fe + rem_pom_r_fe
+
+         ! POM is stored in N units, so C remineralisation is C:N * rem_pom_*_fe.
+         c_remin_fe = self%c_to_n_pom_l * rem_pom_l_fe &
+                    + self%c_to_n_pom_s * rem_pom_s_fe &
+                    + self%c_to_n_pom_r * rem_pom_r_fe
+
+         ! Fe3ox is particulate and stored on the solid fraction, like POM.
+         fe3ox_cons_fe = 4.0_rk * c_remin_fe
+
+         ! Fe2 is dissolved and enters porewater, so convert with p2d.
+         fe2_prod_fe = p2d * 4.0_rk * c_remin_fe
+
+         ! Alkalinity generation by Fe(III) oxide reduction.
+         ! Per mol N remineralised:
+         !   8*C:N + 1 - 1/(N:P)
+         alk_prod_fe = rem_pom_l_fe * (8.0_rk*self%c_to_n_pom_l + 1.0_rk - 1.0_rk/self%n_to_p_pom_l) &
+                     + rem_pom_s_fe * (8.0_rk*self%c_to_n_pom_s + 1.0_rk - 1.0_rk/self%n_to_p_pom_s) &
+                     + rem_pom_r_fe * (8.0_rk*self%c_to_n_pom_r + 1.0_rk - 1.0_rk/self%n_to_p_pom_r)
+
+
+         ! ------------------------------------------------------------------------
+         !    Sulfate Reduction
+         ! ------------------------------------------------------------------------
+         ! (CH2O)(NH3)n/c(H3PO4)p/c + 0.5 SO4--
+         !    -> CO2 + n/c NH3 + p/c H3PO4 + 0.5 H2S + H2O
+         !
+         ! Per mol C remineralised:
+         !   SO4 consumption = 0.5 per mol C
+         !   H2S production  = 0.5 per mol C
+         !   DIC production  = 1 per mol C
+         !   TA production   = 1 + n/c - p/c  per mol C
+         !
+         rem_pom_l_so4 = 0.0_rk; rem_pom_s_so4 = 0.0_rk; rem_pom_r_so4 = 0.0_rk
+         rem_so4_total = 0.0_rk; so4_cons      = 0.0_rk; sulfide_prod  = 0.0_rk
+         alk_prod_so4  = 0.0_rk
+
+         if (use_so4) then
+
+            rem_pom_l_so4 = self%k_remin_pom_l * fso4 * pom_l
+            rem_pom_s_so4 = self%k_remin_pom_s * fso4 * pom_s
+            rem_pom_r_so4 = self%k_remin_pom_r * fso4 * pom_r
+
+            rem_so4_total = rem_pom_l_so4 + rem_pom_s_so4 + rem_pom_r_so4
+
+            c_remin_so4 = self%c_to_n_pom_l * rem_pom_l_so4 &
+                        + self%c_to_n_pom_s * rem_pom_s_so4 &
+                        + self%c_to_n_pom_r * rem_pom_r_so4
+
+             ! Convert SO4 consumption from solid-phase to porewater-volume units,
+            so4_cons = p2d * 0.5_rk * c_remin_so4
+
+            ! sulfide is dissolved -> convert with p2d
+            sulfide_prod = p2d * 0.5_rk * c_remin_so4
+
+            ! Alkalinity (per mol N):
+            ! C:N + 1 - 1/(N:P)
+            alk_prod_so4 = rem_pom_l_so4 * (self%c_to_n_pom_l + 1.0_rk - 1.0_rk/self%n_to_p_pom_l) &
+                         + rem_pom_s_so4 * (self%c_to_n_pom_s + 1.0_rk - 1.0_rk/self%n_to_p_pom_s) &
+                         + rem_pom_r_so4 * (self%c_to_n_pom_r + 1.0_rk - 1.0_rk/self%n_to_p_pom_r)
+         end if
+
          
          ! ------------------------------------------------------------------------
          !    Total remineralisation rates and products
@@ -395,12 +600,12 @@ contains
          ! Total remineralisation rates summed across POM pools and pathways.
          rem_aer_total   = rem_pom_l_aer   + rem_pom_s_aer   + rem_pom_r_aer
          rem_denit_total = rem_pom_l_denit + rem_pom_s_denit + rem_pom_r_denit
-         rem_total       = rem_aer_total + rem_denit_total + rem_mn_total
-
+         rem_total = rem_aer_total + rem_denit_total + rem_mn_total + rem_fe_total + rem_so4_total
+         
          ! Total remineralisation rate for each POM pool.
-         rem_pom_l_tot = rem_pom_l_aer + rem_pom_l_denit + rem_pom_l_mn
-         rem_pom_s_tot = rem_pom_s_aer + rem_pom_s_denit + rem_pom_s_mn
-         rem_pom_r_tot = rem_pom_r_aer + rem_pom_r_denit + rem_pom_r_mn
+         rem_pom_l_tot = rem_pom_l_aer + rem_pom_l_denit + rem_pom_l_mn + rem_pom_l_fe + rem_pom_l_so4
+         rem_pom_s_tot = rem_pom_s_aer + rem_pom_s_denit + rem_pom_s_mn + rem_pom_s_fe + rem_pom_s_so4
+         rem_pom_r_tot = rem_pom_r_aer + rem_pom_r_denit + rem_pom_r_mn + rem_pom_r_fe + rem_pom_r_so4
 
          ! NH4 production during remineralisation.
          ! For each mol N of remineralised organic matter, 1 mol of NH4 is produced.
@@ -423,7 +628,7 @@ contains
 
          ! Alkalinity
          ! Convert alkalinity production from solid-phase volume units to porewater-volume units.
-         alk_prod_tot = p2d * (alk_prod_aer + alk_prod_denit + alk_prod_mn)
+         alk_prod_tot = p2d * (alk_prod_aer + alk_prod_denit + alk_prod_mn + alk_prod_fe + alk_prod_so4)
          
 
          !-------------------------------------------------------------------------
@@ -443,6 +648,14 @@ contains
             _ADD_SOURCE_(self%id_mno2, -mno2_cons_mn)
             _ADD_SOURCE_(self%id_mn2,   mn2_prod_mn)
          end if
+         if (use_fe) then
+            _ADD_SOURCE_(self%id_fe3ox, -fe3ox_cons_fe)
+            _ADD_SOURCE_(self%id_fe2,    fe2_prod_fe)
+         end if
+         if (use_so4) then
+            _ADD_SOURCE_(self%id_so4,     -so4_cons)
+            _ADD_SOURCE_(self%id_sulfide,  sulfide_prod)
+         end if
 
          if (_AVAILABLE_(self%id_dic)) _ADD_SOURCE_(self%id_dic, dic_prod_rem)         
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_prod_tot)        
@@ -458,9 +671,19 @@ contains
          _SET_DIAGNOSTIC_(self%id_mno2_cons_mn, mno2_cons_mn * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_mn2_prod_mn,  mn2_prod_mn  * secs_pr_day)
 
+         _SET_DIAGNOSTIC_(self%id_rem_fe, rem_fe_total * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_fe3ox_cons_fe, fe3ox_cons_fe * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_fe2_prod_fe,   fe2_prod_fe   * secs_pr_day)
+
+         _SET_DIAGNOSTIC_(self%id_rem_so4, rem_so4_total * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_so4_cons, so4_cons * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_sulfide_prod, sulfide_prod * secs_pr_day)         
+
          _SET_DIAGNOSTIC_(self%id_alk_prod_aer,   p2d * alk_prod_aer   * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_alk_prod_denit, p2d * alk_prod_denit * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_alk_prod_mn,    p2d * alk_prod_mn    * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_alk_prod_fe,    p2d * alk_prod_fe    * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_alk_prod_so4,   p2d * alk_prod_so4 * secs_pr_day)
 
       _LOOP_END_
    end subroutine do
