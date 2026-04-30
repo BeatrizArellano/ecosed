@@ -5,6 +5,7 @@ module ecosed_model_library
    use carbonate_chemistry
    use iron
    use manganese
+   use methane
    use nitrogen
    use om_degradation
    use oxygen
@@ -34,6 +35,7 @@ contains
          case ('carbonate_chemistry'); allocate (type_carbonate_chemistry::model)
          case ('iron');                allocate (type_iron::model)
          case ('manganese');           allocate (type_manganese::model)
+         case ('methane');             allocate (type_methane::model)
          case ('nitrogen');            allocate (type_nitrogen::model)
          case ('om_degradation');      allocate (type_om_degradation::model)
          case ('oxygen');              allocate (type_oxygen::model)

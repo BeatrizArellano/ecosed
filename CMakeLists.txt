@@ -4,6 +4,7 @@ add_library(fabm_models_ecosed OBJECT
             src/carbonate_system.F90
             src/iron.F90
             src/manganese.F90
+            src/methane.F90
             src/molecular_diff.F90
             src/nitrogen.F90
             src/om_degradation.F90
