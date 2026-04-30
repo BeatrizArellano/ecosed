@@ -43,6 +43,12 @@ module molecular_diff
     real(rk), parameter, public :: m0_HS = 10.4_rk
     real(rk), parameter, public :: m1_HS = 0.273_rk
 
+    ! CH4  Boudreau (1997) Table 4.4 Eq. 4.60
+    real(rk), parameter, public :: Ea_CH4 = 18.36_rk
+    real(rk), parameter, public :: A0_CH4 = 3047.0_rk
+    
+
+
     !--- Carbonate chemistry
     ! CO2   (method DIFF_O2CO2_AB)
     ! Eq. 4.59 (Boudreau 1997)
