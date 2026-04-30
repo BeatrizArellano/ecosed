@@ -19,6 +19,7 @@ module om_degradation
       type(type_state_variable_id) :: id_mn2, id_mno2
       type(type_state_variable_id) :: id_fe2, id_fe3ox
       type(type_state_variable_id) :: id_so4, id_sulfide
+      type(type_state_variable_id) :: id_ch4
 
       !--- Optional Coupling
       type(type_state_variable_id) :: id_dic, id_alk      
@@ -49,6 +50,9 @@ module om_degradation
       type(type_diagnostic_variable_id) :: id_so4_cons
       type(type_diagnostic_variable_id) :: id_sulfide_prod
       type(type_diagnostic_variable_id) :: id_alk_prod_so4
+      type(type_diagnostic_variable_id) :: id_rem_ch4
+      type(type_diagnostic_variable_id) :: id_ch4_prod
+      type(type_diagnostic_variable_id) :: id_alk_prod_ch4
 
       ! --- Parameters
       real(rk) :: frac_lab, frac_semi, frac_ref
@@ -153,6 +157,7 @@ contains
       call self%register_state_dependency(self%id_fe3ox, 'fe3ox', 'mmol m-3', 'Particulate Fe(III) oxides/hydroxides', required=.false.)
       call self%register_state_dependency(self%id_so4, 'so4', 'mmol m-3', 'Dissolved sulfate', required=.false.)
       call self%register_state_dependency(self%id_sulfide, 'sulfide', 'mmol m-3', 'Total dissolved sulfide', required=.false.)
+      call self%register_state_dependency(self%id_ch4, 'ch4', 'mmol m-3', 'Dissolved methane', required=.false.)
 
       call self%register_state_dependency(self%id_dic, 'dic', 'mmol m-3', 'Total dissolved inorganic carbon', required=.false.)
       call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.) 
@@ -184,6 +189,10 @@ contains
       call self%register_diagnostic_variable(self%id_sulfide_prod, 'SULFIDE_PROD', 'mmol m-3 d-1', 'Sulfide production')
       call self%register_diagnostic_variable(self%id_alk_prod_so4, 'ALK_PROD_SO4', 'mmol eq m-3 d-1', 'Alkalinity production by sulfate reduction')
 
+      call self%register_diagnostic_variable(self%id_rem_ch4, 'REM_CH4', 'mmol N m-3 d-1', 'Methanogenic remineralisation rate')
+      call self%register_diagnostic_variable(self%id_ch4_prod, 'CH4_PROD', 'mmol m-3 d-1', 'Methane production by methanogenesis')
+      call self%register_diagnostic_variable(self%id_alk_prod_ch4, 'ALK_PROD_CH4', 'mmol eq m-3 d-1', 'Alkalinity production by methanogenesis')
+
       call self%register_diagnostic_variable(self%id_alk_prod_aer,   'ALK_PROD_AER',   'mmol eq m-3 d-1', 'Alkalinity production by aerobic remineralisation')
       call self%register_diagnostic_variable(self%id_alk_prod_denit, 'ALK_PROD_DENIT', 'mmol eq m-3 d-1', 'Alkalinity production by denitrification')
       call self%register_diagnostic_variable(self%id_alk_prod_mn,    'ALK_PROD_MN',    'mmol eq m-3 d-1', 'Alkalinity production by Mn oxide reduction')
@@ -202,13 +211,14 @@ contains
       real(rk) :: mn2, mno2
       real(rk) :: fe2, fe3ox
       real(rk) :: so4, sulfide
+      real(rk) :: ch4
 
       logical  :: is_water
       ! Pathway limiting/inhibition functions
       real(rk) :: fi_o2_redox
       real(rk) :: fi_no3_redox
       real(rk) :: fi_mno2_redox, fi_fe3ox_redox, fi_so4_redox
-      real(rk) :: fsum, faer, fdenit, fmn, ffe, fso4
+      real(rk) :: fsum, faer, fdenit, fmn, ffe, fso4, fch4
 
       ! Pathway-specific remineralisation rates
       real(rk) :: rem_pom_l_aer, rem_pom_s_aer, rem_pom_r_aer
@@ -216,9 +226,10 @@ contains
       real(rk) :: rem_pom_l_mn, rem_pom_s_mn, rem_pom_r_mn
       real(rk) :: rem_pom_l_fe, rem_pom_s_fe, rem_pom_r_fe
       real(rk) :: rem_pom_l_so4, rem_pom_s_so4, rem_pom_r_so4
+      real(rk) :: rem_pom_l_ch4, rem_pom_s_ch4, rem_pom_r_ch4
       real(rk) :: rem_pom_l_tot, rem_pom_s_tot, rem_pom_r_tot
       real(rk) :: rem_aer_total, rem_denit_total, rem_mn_total, &
-                  rem_fe_total, rem_so4_total, rem_total
+                  rem_fe_total, rem_so4_total, rem_ch4_total, rem_total
 
       ! Stoichiometric products and sinks
       real(rk) :: dic_prod_rem
@@ -230,9 +241,10 @@ contains
       real(rk) :: c_remin_mn, mno2_cons_mn, mn2_prod_mn
       real(rk) :: c_remin_fe, fe3ox_cons_fe, fe2_prod_fe
       real(rk) :: c_remin_so4, so4_cons, sulfide_prod
+      real(rk) :: c_remin_ch4, ch4_prod, alk_prod_ch4
       real(rk) :: alk_prod_aer, alk_prod_denit, alk_prod_mn, alk_prod_fe, alk_prod_so4, alk_prod_tot
 
-      logical  :: use_mn, use_fe, use_so4
+      logical  :: use_mn, use_fe, use_so4, use_ch4
 
       real(rk), parameter :: secs_pr_day = 86400.0_rk
       real(rk), parameter :: eps_phi     = 1.0e-7_rk      
@@ -272,6 +284,13 @@ contains
          else
             so4 = 0.0_rk
             sulfide = 0.0_rk
+         end if
+
+         use_ch4 = _AVAILABLE_(self%id_ch4)
+         if (use_ch4) then
+            _GET_(self%id_ch4, ch4)
+         else
+            ch4 = 0.0_rk
          end if
 
          !--------------------------------------------------------------------
@@ -352,7 +371,7 @@ contains
             fi_fe3ox_redox = 1.0_rk
          end if
 
-         ! Optional sulfate inhibition, useful later if you add methanogenesis.
+         ! Sulfate inhibition of methanogenesis: suppress CH4 production while SO4 is available.
          if (use_so4) then
             fi_so4_redox = self%ki_so4_redox / (self%ki_so4_redox + so4)
          else
@@ -384,10 +403,16 @@ contains
          else
             fso4 = 0.0_rk
          end if
+         ! Methanogenesis is suppressed by all higher-energy electron acceptors
+         if (use_ch4) then
+            fch4 = fi_o2_redox * fi_no3_redox * fi_mno2_redox * fi_fe3ox_redox * fi_so4_redox
+         else
+            fch4 = 0.0_rk
+         end if
 
 
          ! Combined activity (demand) of all remineralisation pathways under current redox conditions.
-         fsum = faer + fdenit + fmn + ffe + fso4
+         fsum = faer + fdenit + fmn + ffe + fso4 + fch4
 
          ! If the combined activity exceeds the maximum potential, rescale pathway factors so that
          ! total remineralisation does not exceed the intrinsic first-order degradation potential (k * POM).
@@ -403,6 +428,7 @@ contains
             fmn    = fmn    / fsum
             ffe    = ffe    / fsum
             fso4   = fso4   / fsum
+            fch4   = fch4   / fsum
          end if         
 
          !-------------------------------------------------------------------------
@@ -593,6 +619,48 @@ contains
                          + rem_pom_r_so4 * (self%c_to_n_pom_r + 1.0_rk - 1.0_rk/self%n_to_p_pom_r)
          end if
 
+         ! ------------------------------------------------------------------------
+         !    Methanogenesis
+         ! ------------------------------------------------------------------------
+         ! Organic matter degradation after
+         ! higher-energy electron acceptors have been depleted:
+         !
+         ! (CH2O)(NH3)n/c(H3PO4)p/c
+         !    -> 0.5 CO2 + 0.5 CH4 + n/c NH3 + p/c H3PO4
+         !
+         ! Per mol C remineralised:
+         !   CH4 production = 0.5 per mol C
+         !   DIC production = 0.5 per mol C
+         !   TA production  = n/c - p/c per mol C
+         !
+         rem_pom_l_ch4 = 0.0_rk; rem_pom_s_ch4 = 0.0_rk; rem_pom_r_ch4 = 0.0_rk
+         rem_ch4_total = 0.0_rk; c_remin_ch4   = 0.0_rk
+         ch4_prod      = 0.0_rk; alk_prod_ch4  = 0.0_rk
+
+         if (use_ch4) then
+
+            rem_pom_l_ch4 = self%k_remin_pom_l * fch4 * pom_l
+            rem_pom_s_ch4 = self%k_remin_pom_s * fch4 * pom_s
+            rem_pom_r_ch4 = self%k_remin_pom_r * fch4 * pom_r
+
+            rem_ch4_total = rem_pom_l_ch4 + rem_pom_s_ch4 + rem_pom_r_ch4
+
+            ! POM is stored in N units, so C remineralisation is C:N * rem_pom_*_ch4.
+            c_remin_ch4 = self%c_to_n_pom_l * rem_pom_l_ch4 &
+                        + self%c_to_n_pom_s * rem_pom_s_ch4 &
+                        + self%c_to_n_pom_r * rem_pom_r_ch4
+
+            ! Methane is dissolved and enters porewater, so convert with p2d.
+            ! Only half of remineralised organic C becomes CH4; the other half becomes DIC.
+            ch4_prod = p2d * 0.5_rk * c_remin_ch4
+
+            ! Alkalinity generation by methanogenesis.
+            ! Per mol N remineralised:
+            !   1 - 1/(N:P)
+            alk_prod_ch4 = rem_pom_l_ch4 * (1.0_rk - 1.0_rk/self%n_to_p_pom_l) &
+                         + rem_pom_s_ch4 * (1.0_rk - 1.0_rk/self%n_to_p_pom_s) &
+                         + rem_pom_r_ch4 * (1.0_rk - 1.0_rk/self%n_to_p_pom_r)
+         end if
          
          ! ------------------------------------------------------------------------
          !    Total remineralisation rates and products
@@ -600,12 +668,12 @@ contains
          ! Total remineralisation rates summed across POM pools and pathways.
          rem_aer_total   = rem_pom_l_aer   + rem_pom_s_aer   + rem_pom_r_aer
          rem_denit_total = rem_pom_l_denit + rem_pom_s_denit + rem_pom_r_denit
-         rem_total = rem_aer_total + rem_denit_total + rem_mn_total + rem_fe_total + rem_so4_total
+         rem_total = rem_aer_total + rem_denit_total + rem_mn_total + rem_fe_total + rem_so4_total + rem_ch4_total
          
          ! Total remineralisation rate for each POM pool.
-         rem_pom_l_tot = rem_pom_l_aer + rem_pom_l_denit + rem_pom_l_mn + rem_pom_l_fe + rem_pom_l_so4
-         rem_pom_s_tot = rem_pom_s_aer + rem_pom_s_denit + rem_pom_s_mn + rem_pom_s_fe + rem_pom_s_so4
-         rem_pom_r_tot = rem_pom_r_aer + rem_pom_r_denit + rem_pom_r_mn + rem_pom_r_fe + rem_pom_r_so4
+         rem_pom_l_tot = rem_pom_l_aer + rem_pom_l_denit + rem_pom_l_mn + rem_pom_l_fe + rem_pom_l_so4 + rem_pom_l_ch4
+         rem_pom_s_tot = rem_pom_s_aer + rem_pom_s_denit + rem_pom_s_mn + rem_pom_s_fe + rem_pom_s_so4 + rem_pom_s_ch4
+         rem_pom_r_tot = rem_pom_r_aer + rem_pom_r_denit + rem_pom_r_mn + rem_pom_r_fe + rem_pom_r_so4 + rem_pom_r_ch4
 
          ! NH4 production during remineralisation.
          ! For each mol N of remineralised organic matter, 1 mol of NH4 is produced.
@@ -618,17 +686,22 @@ contains
                             + rem_pom_r_tot / self%n_to_p_pom_r)
 
          ! DIC production is computed from total remineralised organic matter using the C:N ratio of each POM pool.
-         ! 1 mol of DIC is produced per mol of C remineralised in OM. 
+         ! 1 mol of DIC is produced per mol of C remineralised in OM for most pathways. 
          dic_prod_rem = self%c_to_n_pom_l * rem_pom_l_tot &
                       + self%c_to_n_pom_s * rem_pom_s_tot &
                       + self%c_to_n_pom_r * rem_pom_r_tot   
 
-         ! Convert DIC production from solid-phase to porewater-volume units.           
-         dic_prod_rem = p2d * dic_prod_rem        
+                    
+         ! Methanogenesis partitions remineralised organic C equally between DIC and CH4.
+         ! Therefore, only 0.5 mol DIC is produced per mol C remineralised via methanogenesis.
+         ! The DIC estimate above is corrected by subtracting 0.5 * c_remin_ch4.
+         dic_prod_rem = dic_prod_rem - 0.5_rk * c_remin_ch4 
+         ! Convert DIC production from solid-phase to porewater-volume units. 
+         dic_prod_rem = p2d * dic_prod_rem 
 
          ! Alkalinity
          ! Convert alkalinity production from solid-phase volume units to porewater-volume units.
-         alk_prod_tot = p2d * (alk_prod_aer + alk_prod_denit + alk_prod_mn + alk_prod_fe + alk_prod_so4)
+         alk_prod_tot = p2d * (alk_prod_aer + alk_prod_denit + alk_prod_mn + alk_prod_fe + alk_prod_so4 + alk_prod_ch4)
          
 
          !-------------------------------------------------------------------------
@@ -656,6 +729,7 @@ contains
             _ADD_SOURCE_(self%id_so4,     -so4_cons)
             _ADD_SOURCE_(self%id_sulfide,  sulfide_prod)
          end if
+         if (use_ch4) _ADD_SOURCE_(self%id_ch4, ch4_prod)
 
          if (_AVAILABLE_(self%id_dic)) _ADD_SOURCE_(self%id_dic, dic_prod_rem)         
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_prod_tot)        
@@ -677,13 +751,17 @@ contains
 
          _SET_DIAGNOSTIC_(self%id_rem_so4, rem_so4_total * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_so4_cons, so4_cons * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_sulfide_prod, sulfide_prod * secs_pr_day)         
+         _SET_DIAGNOSTIC_(self%id_sulfide_prod, sulfide_prod * secs_pr_day)       
+         
+         _SET_DIAGNOSTIC_(self%id_rem_ch4, rem_ch4_total * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_ch4_prod, ch4_prod * secs_pr_day)
 
          _SET_DIAGNOSTIC_(self%id_alk_prod_aer,   p2d * alk_prod_aer   * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_alk_prod_denit, p2d * alk_prod_denit * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_alk_prod_mn,    p2d * alk_prod_mn    * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_alk_prod_fe,    p2d * alk_prod_fe    * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_alk_prod_so4,   p2d * alk_prod_so4 * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_alk_prod_ch4, p2d * alk_prod_ch4 * secs_pr_day)
 
       _LOOP_END_
    end subroutine do
