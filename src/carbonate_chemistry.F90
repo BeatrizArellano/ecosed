@@ -102,7 +102,7 @@ contains
       call self%register_state_dependency(self%id_po4, 'po4', 'mmol m-3', 'Phosphate', required=.false.)
       call self%register_state_dependency(self%id_si , 'si' , 'mmol m-3', 'Silicate', required=.false.)
       call self%register_state_dependency(self%id_nh4, 'nh4', 'mmol m-3', 'Ammonium', required=.false.)
-      call self%register_state_dependency(self%id_h2s, 'h2s', 'mmol m-3', 'Hydrogen sulfide', required=.false.)
+      call self%register_state_dependency(self%id_h2s, 'sulfide', 'mmol m-3', 'Total dissolved sulfide', required=.false.)
 
       ! ---------------- Env dependencies ----------------
       call self%register_dependency(self%id_temp,    standard_variables%temperature)
