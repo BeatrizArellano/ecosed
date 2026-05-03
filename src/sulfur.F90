@@ -40,7 +40,8 @@ module sulfur
       type(type_diagnostic_variable_id) :: id_sulfide_ox
 
       ! --- Parameters
-      real(rk) :: k_sulfide_ox      ! Sulfide oxidation rate (s-1 internally)
+      real(rk) :: k_sulfide_ox      ! Maximum sulfide oxidation rate (s-1 internally)
+      real(rk) :: o2_sulfide_ox_sat ! O2 where sulfide oxidation is fully active
 
    contains
       procedure :: initialize
@@ -54,10 +55,11 @@ contains
       integer,            intent(in)            :: configunit
 
       real(rk), parameter :: d_per_s = 1.0_rk / 86400.0_rk
+      real(rk), parameter :: eps     = 1.0e-12_rk
 
       ! ---------------- Parameters ----------------
-      call self%get_parameter(self%k_sulfide_ox, 'k_sulfide_ox', 'd-1', 'First-order sulfide oxidation rate', &
-                              default=1.0_rk, scale_factor=d_per_s, minimum=0.0_rk)
+      call self%get_parameter(self%k_sulfide_ox, 'k_sulfide_ox', 'd-1', 'Maximum first-order sulfide oxidation rate', default=5.0_rk, scale_factor=d_per_s, minimum=0.0_rk)
+      call self%get_parameter(self%o2_sulfide_ox_sat, 'o2_sulfide_ox_sat', 'mmol m-3', 'O2 concentration above which sulfide oxidation is fully active', default=0.1_rk, minimum=eps)
 
       ! ---------------- State variables ----------------
       call self%register_state_variable(self%id_so4, 'so4', 'mmol m-3', &
@@ -88,22 +90,19 @@ contains
       class(type_sulfur), intent(in) :: self
       _DECLARE_ARGUMENTS_DO_
 
-      real(rk) :: so4, sulfide, o2
-      real(rk) :: fO2
+      real(rk) :: sulfide, o2
+      real(rk) :: fO2, xO2
       real(rk) :: sulfide_ox
       real(rk) :: o2_cons_sulfide_ox
       real(rk) :: alk_change
 
       real(rk), parameter :: secs_per_day        = 86400.0_rk
-      real(rk), parameter :: o2_sulfide_ox_thr   = 1.5_rk
-      real(rk), parameter :: o2_sulfide_ox_width = 0.2_rk
 
       real(rk), parameter :: o2_per_sulfide_ox  = 2.0_rk
       real(rk), parameter :: alk_per_sulfide_ox = -2.0_rk
 
       _LOOP_BEGIN_
 
-         _GET_(self%id_so4, so4)
          _GET_(self%id_sulfide, sulfide)
          _GET_(self%id_o2, o2)
 
@@ -121,7 +120,17 @@ contains
          ! using HS-, because HS- dominates dissolved sulfide at seawater pH.
          ! ------------------------------------------------------------------
 
-         fO2 = 0.5_rk * (1.0_rk + tanh((max(o2, 0.0_rk) - o2_sulfide_ox_thr) / o2_sulfide_ox_width))
+         ! Sulfide oxidation is represented as first-order in sulfide, with a capped
+         ! maximum rate. Oxygen acts as an activation factor via a smoothstep
+         ! function: oxidation is zero at O2 = 0, increases smoothly at low O2,
+         ! and reaches full activity above a small O2 threshold.
+         !
+         ! This replaces the standard mass-action formulation (rate ∝ sulfide × O2),
+         ! which can lead to very fast, numerically stiff reactions under oxic
+         ! conditions. The present formulation preserves O2 control while avoiding
+         ! excessive rates and improving numerical stability.
+         xO2 = max(0.0_rk, min(1.0_rk, max(o2, 0.0_rk) / self%o2_sulfide_ox_sat))
+         fO2 = xO2*xO2*xO2 * (xO2 * (6.0_rk*xO2 - 15.0_rk) + 10.0_rk)
 
          sulfide_ox = self%k_sulfide_ox * fO2 * max(sulfide, 0.0_rk)
 

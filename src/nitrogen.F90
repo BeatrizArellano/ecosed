@@ -126,7 +126,7 @@ contains
 
          !------------------------------------------------------------------------
          !   Nitrification (NH4 -> NO3)
-         !   NH4+ + 2 O2 -> NO3- + 2H+ + H2O
+         !   NH4+ + 2O2 -> NO3- + 2H+ + H2O
          ! Consumes NH4 and O2, produces NO3 (no DIC change, alkalinity decreases).
          ! First-order in NH4, enhanced by temperature, reduced by low O2 and light.
          !------------------------------------------------------------------------
@@ -145,7 +145,8 @@ contains
          ! Light inhibits nitrification; k_par_nit sets the 50% inhibition level.
          fI = 1.0_rk / (1.0_rk + max(par, 0.0_rk) / self%k_par_nit)
 
-         ! Nitrification rate (mmol N m-3 s-1).
+         ! Nitrification rate(mmol N m-3 s-1): first-order in NH4, modulated by temperature,
+         ! inhibited by light, and suppressed under low-O2 conditions.
          nit = self%k_nit * fT * fO2 * fI * max(nh4, 0.0_rk)
 
          ! Stoichiometric O2 consumption.

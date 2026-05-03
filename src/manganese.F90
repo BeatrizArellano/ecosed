@@ -43,7 +43,8 @@ module manganese
       type(type_diagnostic_variable_id) :: id_mn_ox
 
       ! --- Parameters
-      real(rk) :: k_mn_ox      ! Mn2 oxidation rate (s-1 internally)
+      real(rk) :: k_mn_ox        ! Mn2 oxidation rate (s-1 internally)
+      real(rk) :: o2_mn_ox_sat   ! O2 concentration where Mn oxidation is fully active
 
    contains
       procedure :: initialize
@@ -56,13 +57,15 @@ contains
       class(type_manganese), intent(inout), target :: self
       integer,                intent(in)            :: configunit
 
-      real(rk), parameter :: d_per_s = 1.0_rk / 86400.0_rk
+      real(rk), parameter :: d_per_s     = 1.0_rk / 86400.0_rk
       real(rk), parameter :: m_d_per_m_s = 1.0_rk / 86400.0_rk
+      real(rk), parameter :: eps         = 1.0e-12_rk
 
       real(rk) :: w_mno2       ! MnO2 sinking velocity (m s-1 internally)
 
       ! ---------------- Parameters ----------------
-      call self%get_parameter(self%k_mn_ox, 'k_mn_ox', 'd-1', 'First-order Mn(II) oxidation rate', default=1.0_rk, scale_factor=d_per_s, minimum=0.0_rk)
+      call self%get_parameter(self%k_mn_ox, 'k_mn_ox', 'd-1', 'Maximum first-order Mn(II) oxidation rate', default=5.0_rk, scale_factor=d_per_s, minimum=0.0_rk)
+      call self%get_parameter(self%o2_mn_ox_sat, 'o2_mn_ox_sat', 'mmol m-3', 'O2 concentration above which Mn(II) oxidation is fully active', default=0.1_rk, minimum=eps)
       call self%get_parameter(w_mno2, 'w_mno2', 'm d-1', 'Sinking velocity of particulate MnO2', default=-1.0_rk, scale_factor=m_d_per_m_s)
 
       ! ---------------- State variables ----------------
@@ -93,17 +96,14 @@ contains
       _DECLARE_ARGUMENTS_DO_
 
       real(rk) :: mn2, o2
-      real(rk) :: fO2
+      real(rk) :: fO2, xO2
       real(rk) :: mn_ox
       real(rk) :: o2_cons_mn_ox
       real(rk) :: alk_change
       real(rk) :: phi, phi_s, d2p
-      real(rk) :: mno2_prod
-      logical  :: is_water      
+      real(rk) :: mno2_prod      
 
       real(rk), parameter :: secs_per_day   = 86400.0_rk
-      real(rk), parameter :: o2_mn_ox_thr   = 1.5_rk         ! O2 Threshold for Mn Oxidation (mmol O2 m-3)
-      real(rk), parameter :: o2_mn_ox_width = 0.2_rk         ! narrow transition width
       real(rk), parameter :: o2_per_mn_ox   = 0.5_rk
       real(rk), parameter :: alk_per_mn_ox  = -2.0_rk
       real(rk), parameter :: eps_phi        = 1.0e-7_rk
@@ -111,6 +111,7 @@ contains
       _LOOP_BEGIN_
 
          _GET_(self%id_mn2, mn2)
+         _GET_(self%id_o2,  o2)
 
          !--------------------------------------------------------------------
          !  Conversion factors for cross-phase reactions (corrected by porosity)
@@ -125,10 +126,8 @@ contains
          phi_s = max(1.0_rk - phi, 0.0_rk)
 
          if (phi > eps_phi .and. phi < 1.0_rk - eps_phi) then
-            is_water = .false.
             d2p = phi / phi_s
          else
-            is_water = .true.
             d2p = 1.0_rk
          end if
 
@@ -142,12 +141,22 @@ contains
          ! because 2 equivalents of HCO3⁻ are removed
          ! No explicit DIC changes.
          ! ------------------------------------------------------------------
-         _GET_(self%id_o2, o2)
 
-         ! Smooth O2 activation: Mn(II) oxidation switches on rapidly above threshold.
-         fO2 = 0.5_rk * (1.0_rk + tanh((max(o2, 0.0_rk) - o2_mn_ox_thr) / o2_mn_ox_width))
+         ! O2 activation using a smooth step function.
+         ! fO2 = 0 when O2 = 0, smoothly increases for trace O2,
+         ! and reaches 1 when O2 >= o2_mn_ox_sat.
+         xO2 = max(0.0_rk, min(1.0_rk, max(o2, 0.0_rk) / self%o2_mn_ox_sat))
+         fO2 = xO2*xO2*xO2 * (xO2 * (6.0_rk*xO2 - 15.0_rk) + 10.0_rk)
 
-         ! Effective Mn2+ Oxidation rate
+         ! Mn(II) oxidation is represented as first-order in Mn2, with a capped
+         ! maximum rate. Oxygen acts as an activation factor via a smoothstep
+         ! function: oxidation is zero at O2 = 0, increases smoothly at low O2,
+         ! and reaches full activity above a small O2 threshold.
+         !
+         ! This replaces the standard mass-action formulation (rate ∝ Mn2 × O2),
+         ! which can lead to very fast, numerically stiff reactions under oxic
+         ! conditions. The present formulation preserves O2 control of the process
+         ! while avoiding excessive rates and improving numerical stability.
          mn_ox = self%k_mn_ox * fO2 * max(mn2, 0.0_rk)
 
          o2_cons_mn_ox = o2_per_mn_ox * mn_ox     ! Consumed O2
