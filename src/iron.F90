@@ -43,7 +43,8 @@ module iron
       type(type_diagnostic_variable_id) :: id_fe_ox
 
       ! --- Parameters
-      real(rk) :: k_fe_ox      ! Fe2 oxidation rate (s-1 internally)
+      real(rk) :: k_fe_ox        ! Maximum Fe2 oxidation rate (s-1 internally)
+      real(rk) :: o2_fe_ox_sat   ! O2 concentration where Fe oxidation is fully active
 
    contains
       procedure :: initialize
@@ -58,15 +59,14 @@ contains
 
       real(rk), parameter :: d_per_s       = 1.0_rk / 86400.0_rk
       real(rk), parameter :: m_d_per_m_s   = 1.0_rk / 86400.0_rk
+      real(rk), parameter :: eps           = 1.0e-12_rk
 
       real(rk) :: w_fe3ox
 
       ! ---------------- Parameters ----------------
-      call self%get_parameter(self%k_fe_ox, 'k_fe_ox', 'd-1', 'First-order Fe(II) oxidation rate', &
-         default=1.0_rk, scale_factor=d_per_s, minimum=0.0_rk)
-
-      call self%get_parameter(w_fe3ox, 'w_fe3ox', 'm d-1', 'Sinking velocity of particulate Fe(III) oxides', &
-         default=-1.0_rk, scale_factor=m_d_per_m_s)
+      call self%get_parameter(self%k_fe_ox, 'k_fe_ox', 'd-1', 'Maximum first-order Fe(II) oxidation rate', default=5.0_rk, scale_factor=d_per_s, minimum=0.0_rk)
+      call self%get_parameter(self%o2_fe_ox_sat, 'o2_fe_ox_sat', 'mmol m-3', 'O2 concentration above which Fe(II) oxidation is fully active', default=0.1_rk, minimum=eps)
+      call self%get_parameter(w_fe3ox, 'w_fe3ox', 'm d-1', 'Sinking velocity of particulate Fe(III) oxides', default=-1.0_rk, scale_factor=m_d_per_m_s)
 
       ! ---------------- State variables ----------------
       call self%register_state_variable(self%id_fe2, 'fe2', 'mmol m-3', 'Dissolved Fe(II)', initial_value=0.001_rk, minimum=0.0_rk, no_river_dilution=.true.)
@@ -97,17 +97,14 @@ contains
       _DECLARE_ARGUMENTS_DO_
 
       real(rk) :: fe2, o2
-      real(rk) :: fO2
+      real(rk) :: fO2, xO2
       real(rk) :: fe_ox
       real(rk) :: o2_cons_fe_ox
       real(rk) :: alk_change
       real(rk) :: phi, phi_s, d2p
       real(rk) :: fe3ox_prod
-      logical  :: is_water
 
       real(rk), parameter :: secs_per_day   = 86400.0_rk
-      real(rk), parameter :: o2_fe_ox_thr   = 1.5_rk
-      real(rk), parameter :: o2_fe_ox_width = 0.2_rk
       real(rk), parameter :: o2_per_fe_ox   = 0.25_rk
       real(rk), parameter :: alk_per_fe_ox  = -2.0_rk
       real(rk), parameter :: eps_phi        = 1.0e-7_rk
@@ -115,6 +112,7 @@ contains
       _LOOP_BEGIN_
 
          _GET_(self%id_fe2, fe2)
+         _GET_(self%id_o2, o2)
 
          !--------------------------------------------------------------------
          ! Conversion factors for cross-phase reactions.
@@ -130,10 +128,8 @@ contains
          phi_s = max(1.0_rk - phi, 0.0_rk)
 
          if (phi > eps_phi .and. phi < 1.0_rk - eps_phi) then
-            is_water = .false.
             d2p = phi / phi_s
          else
-            is_water = .true.
             d2p = 1.0_rk
          end if
 
@@ -145,10 +141,19 @@ contains
          ! Consumes dissolved Fe2 and O2, produces particulate Fe3ox.
          ! Alkalinity decreases by 2 equivalents per mol Fe oxidised.
          ! No explicit DIC change: HCO3- is converted to CO2.
-         ! ------------------------------------------------------------------
-         _GET_(self%id_o2, o2)
+         ! ------------------------------------------------------------------       
 
-         fO2 = 0.5_rk * (1.0_rk + tanh((max(o2, 0.0_rk) - o2_fe_ox_thr) / o2_fe_ox_width))
+         ! Fe(II) oxidation is represented as first-order in Fe2, with a capped
+         ! maximum rate. Oxygen acts as an activation factor via a smoothstep
+         ! function: oxidation is zero at O2 = 0, increases smoothly at low O2,
+         ! and reaches full activity above a small O2 threshold.
+         !
+         ! This replaces the standard mass-action formulation (rate ∝ Fe2 × O2),
+         ! which can lead to very fast, numerically stiff reactions under oxic
+         ! conditions. The present formulation preserves O2 control of the process
+         ! while avoiding excessive rates and improving numerical stability.         
+         xO2 = max(0.0_rk, min(1.0_rk, max(o2, 0.0_rk) / self%o2_fe_ox_sat))
+         fO2 = xO2*xO2*xO2 * (xO2 * (6.0_rk*xO2 - 15.0_rk) + 10.0_rk)
 
          fe_ox = self%k_fe_ox * fO2 * max(fe2, 0.0_rk)
 
