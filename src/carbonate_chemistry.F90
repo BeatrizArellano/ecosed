@@ -39,6 +39,7 @@ module carbonate_chemistry
       type(type_state_variable_id) :: id_si
       type(type_state_variable_id) :: id_nh4
       type(type_state_variable_id) :: id_h2s
+      type(type_state_variable_id) :: id_so4
 
       ! --- Main dependencies
       type(type_dependency_id) :: id_temp
@@ -103,6 +104,7 @@ contains
       call self%register_state_dependency(self%id_si , 'si' , 'mmol m-3', 'Silicate', required=.false.)
       call self%register_state_dependency(self%id_nh4, 'nh4', 'mmol m-3', 'Ammonium', required=.false.)
       call self%register_state_dependency(self%id_h2s, 'sulfide', 'mmol m-3', 'Total dissolved sulfide', required=.false.)
+      call self%register_state_dependency(self%id_so4, 'so4', 'mmol m-3', 'Total dissolved sulfate', required=.false.)
 
       ! ---------------- Env dependencies ----------------
       call self%register_dependency(self%id_temp,    standard_variables%temperature)
@@ -142,8 +144,8 @@ contains
       _DECLARE_ARGUMENTS_DO_
 
       real(rk) :: dic, alk, temp, sal, rho, pres
-      real(rk) :: po4, si, nh4, h2s
-      real(rk) :: dic_kg, alk_kg, po4_kg, si_kg, nh4_kg, h2s_kg
+      real(rk) :: po4, si, nh4, h2s, so4
+      real(rk) :: dic_kg, alk_kg, po4_kg, si_kg, nh4_kg, h2s_kg, so4_kg
 
       real(rk) :: tb, ts, tf
       real(rk) :: k1, k2, kb, kw, ks, kf
@@ -172,11 +174,14 @@ contains
          si  = 0.0_rk
          nh4 = 0.0_rk
          h2s = 0.0_rk
+         so4 = 0.0_rk
+
          ! If coupled, then retrieve actual concentrations for these tracers [mmol m-3]
          if (_AVAILABLE_(self%id_po4)) _GET_(self%id_po4, po4)
          if (_AVAILABLE_(self%id_si )) _GET_(self%id_si , si )
          if (_AVAILABLE_(self%id_nh4)) _GET_(self%id_nh4, nh4)
          if (_AVAILABLE_(self%id_h2s)) _GET_(self%id_h2s, h2s)
+         if (_AVAILABLE_(self%id_so4)) _GET_(self%id_so4, so4)
 
          ! --- Convert from mmol m-3 to mol kg-1
          dic_kg = dic / (1000.0_rk * rho)
@@ -185,6 +190,7 @@ contains
          si_kg  = si  / (1000.0_rk * rho)
          nh4_kg = nh4 / (1000.0_rk * rho)
          h2s_kg = h2s / (1000.0_rk * rho)
+         so4_kg = so4 / (1000.0_rk * rho)
 
          ! Retrieve last value for H+         
          _GET_(self%id_hplus_prev, h_prev)       ! mmol m-3 from previous timestep
@@ -192,6 +198,10 @@ contains
 
          ! ---------------- Background seawater totals ----------------
          call compute_background_totals_from_salinity(sal, tb, ts, tf)
+
+         if (_AVAILABLE_(self%id_so4)) then
+            ts = so4_kg
+         end if
 
          ! ---------------- Equilibrium constants ----------------
          call compute_equilibrium_constants(temp, sal, pres, ts, tf, &
