@@ -40,8 +40,7 @@ module methane
         type(type_diagnostic_variable_id) :: id_ch4_ox      
         type(type_diagnostic_variable_id) :: id_ch4_an
         ! --- Parameters
-        real(rk) :: k_ch4_ox                 ! Maximum aerobic CH4 oxidation rate (s-1 internally)
-        real(rk) :: o2_ch4_ox_sat            ! O2 where aerobic CH4 oxidation is fully active
+        real(rk) :: k_ch4_ox                 ! Aerobic CH4 oxidation rate constant (m3 mmol-1 s-1 internally)
         real(rk) :: k_ch4_so4                ! Maximum sulfate-AOM rate (s-1 internally)        
         real(rk) :: k_so4_ch4                ! SO4 half-saturation for AOM
         real(rk) :: o2_ch4_anox_thr          ! O2 where AOM is fully suppressed
@@ -61,8 +60,8 @@ contains
         real(rk), parameter :: eps     = 1.0e-12_rk
 
         ! ---------------- Parameters ----------------
-        call self%get_parameter(self%k_ch4_ox, 'k_ch4_ox', 'd-1', 'Maximum first-order aerobic methane oxidation rate', default=5.0_rk, scale_factor=d_per_s, minimum=0.0_rk)
-        call self%get_parameter(self%o2_ch4_ox_sat, 'o2_ch4_ox_sat', 'mmol m-3', 'O2 concentration above which aerobic methane oxidation is fully active', default=0.1_rk, minimum=eps)
+        call self%get_parameter(self%k_ch4_ox, 'k_ch4_ox', 'm3 mmol-1 d-1', 'Second-order mass-action rate constant for aerobic methane oxidation by oxygen', &
+                                default=0.002738_rk, scale_factor=d_per_s, minimum=0.0_rk)
         call self%get_parameter(self%k_ch4_so4, 'k_ch4_so4', 'd-1', 'Maximum first-order sulfate-driven methane oxidation rate', default=0.05_rk, scale_factor=d_per_s, minimum=0.0_rk)
         call self%get_parameter(self%k_so4_ch4, 'k_so4_ch4', 'mmol m-3', 'Sulfate half-saturation concentration for anaerobic methane oxidation', default=1600.0_rk, minimum=eps)
         call self%get_parameter(self%o2_ch4_anox_thr, 'o2_ch4_anox_thr', 'mmol m-3', 'O2 concentration above which anaerobic methane oxidation is suppressed', default=1.0_rk, minimum=eps)
@@ -90,7 +89,7 @@ contains
         _DECLARE_ARGUMENTS_DO_
 
         real(rk) :: ch4, o2, so4
-        real(rk) :: f_oxic, f_anoxic, fSO4, xO2, xO2_an
+        real(rk) :: f_anoxic, fSO4, xO2_an
         real(rk) :: ch4_ox, ch4_an
 
         real(rk), parameter :: secs_per_day    = 86400.0_rk
@@ -118,22 +117,17 @@ contains
             !   CH4 + SO4-- -> HCO3- + HS- + H2O
             ! ---------------------------------------------------------------
 
-            ! Aerobic oxidation is activated by O2 using a smootherstep function:
-            ! it is zero at O2 = 0, increases smoothly at trace O2, and reaches
-            ! full activity above a small O2 threshold.
-            !
-            ! Sulfate-AOM is suppressed by O2 using a separate smootherstep
-            ! inhibition factor. This avoids forcing AOM to switch off at the same
-            ! very low O2 level where aerobic methane oxidation becomes active.
-            xO2 = max(0.0_rk, min(1.0_rk, max(o2, 0.0_rk) / self%o2_ch4_ox_sat))
-            f_oxic = xO2*xO2*xO2 * (xO2 * (6.0_rk*xO2 - 15.0_rk) + 10.0_rk)
-
             ! AOM inhibition by O2
             xO2_an = max(0.0_rk, min(1.0_rk, max(o2, 0.0_rk) / self%o2_ch4_anox_thr))
             f_anoxic = 1.0_rk - xO2_an*xO2_an*xO2_an * (xO2_an * (6.0_rk*xO2_an - 15.0_rk) + 10.0_rk)
 
-            ! Aerobic methane oxidation
-            ch4_ox = self%k_ch4_ox * f_oxic * max(ch4, 0.0_rk)
+            ! Aerobic methane oxidation is represented using second-order
+            ! mass-action kinetics:
+            !
+            !   rate = k_ch4_ox * [CH4] * [O2]
+            !
+            ! CH4 and O2 are dissolved-phase tracers, so no phase conversion is needed.
+            ch4_ox = self%k_ch4_ox * max(ch4, 0.0_rk) * max(o2, 0.0_rk)
 
             ! Sulfate-AOM, restricted to low-O2 conditions.
             if (_AVAILABLE_(self%id_so4) .and. _AVAILABLE_(self%id_sulfide)) then

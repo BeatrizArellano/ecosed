@@ -43,8 +43,8 @@ module manganese
       type(type_diagnostic_variable_id) :: id_mn_ox
 
       ! --- Parameters
-      real(rk) :: k_mn_ox        ! Mn2 oxidation rate (s-1 internally)
-      real(rk) :: o2_mn_ox_sat   ! O2 concentration where Mn oxidation is fully active
+      ! --- Parameters
+      real(rk) :: k_mn_ox        ! Mn(II) oxidation rate constant (m3 mmol-1 s-1 internally)
 
    contains
       procedure :: initialize
@@ -64,8 +64,8 @@ contains
       real(rk) :: w_mno2       ! MnO2 sinking velocity (m s-1 internally)
 
       ! ---------------- Parameters ----------------
-      call self%get_parameter(self%k_mn_ox, 'k_mn_ox', 'd-1', 'Maximum first-order Mn(II) oxidation rate', default=5.0_rk, scale_factor=d_per_s, minimum=0.0_rk)
-      call self%get_parameter(self%o2_mn_ox_sat, 'o2_mn_ox_sat', 'mmol m-3', 'O2 concentration above which Mn(II) oxidation is fully active', default=0.1_rk, minimum=eps)
+      call self%get_parameter(self%k_mn_ox, 'k_mn_ox', 'm3 mmol-1 d-1', 'Second-order mass-action rate constant for Mn(II) oxidation by oxygen', &
+                              default=2.738_rk, scale_factor=d_per_s, minimum=0.0_rk)
       call self%get_parameter(w_mno2, 'w_mno2', 'm d-1', 'Sinking velocity of particulate MnO2', default=-1.0_rk, scale_factor=m_d_per_m_s)
 
       ! ---------------- State variables ----------------
@@ -96,7 +96,6 @@ contains
       _DECLARE_ARGUMENTS_DO_
 
       real(rk) :: mn2, o2
-      real(rk) :: fO2, xO2
       real(rk) :: mn_ox
       real(rk) :: o2_cons_mn_ox
       real(rk) :: alk_change
@@ -136,28 +135,15 @@ contains
          !
          ! Mn2+ + 0.5 O2 + 2HCO3- -> MnO2(s) + 2 CO2 + H2O
          !
-         ! Consumes dissolved Mn2 and O2, produces particulate MnO2.
-         ! Alkalinity decreases by 2 equivalents per mol Mn oxidised 
-         ! because 2 equivalents of HCO3⁻ are removed
-         ! No explicit DIC changes.
-         ! ------------------------------------------------------------------
-
-         ! O2 activation using a smooth step function.
-         ! fO2 = 0 when O2 = 0, smoothly increases for trace O2,
-         ! and reaches 1 when O2 >= o2_mn_ox_sat.
-         xO2 = max(0.0_rk, min(1.0_rk, max(o2, 0.0_rk) / self%o2_mn_ox_sat))
-         fO2 = xO2*xO2*xO2 * (xO2 * (6.0_rk*xO2 - 15.0_rk) + 10.0_rk)
-
-         ! Mn(II) oxidation is represented as first-order in Mn2, with a capped
-         ! maximum rate. Oxygen acts as an activation factor via a smoothstep
-         ! function: oxidation is zero at O2 = 0, increases smoothly at low O2,
-         ! and reaches full activity above a small O2 threshold.
+         ! Mass-action kinetics:
+         !   rate = k_mn_ox * [Mn2+] * [O2]
          !
-         ! This replaces the standard mass-action formulation (rate ∝ Mn2 × O2),
-         ! which can lead to very fast, numerically stiff reactions under oxic
-         ! conditions. The present formulation preserves O2 control of the process
-         ! while avoiding excessive rates and improving numerical stability.
-         mn_ox = self%k_mn_ox * fO2 * max(mn2, 0.0_rk)
+         ! Mn2 and O2 are dissolved-phase tracers, so the rate is computed per
+         ! porewater volume in sediments and per water volume in the water column.
+         ! MnO2 is particulate, so its production is converted from dissolved-
+         ! phase to solid-phase concentration using d2p.
+         ! ------------------------------------------------------------------
+         mn_ox = self%k_mn_ox * max(mn2, 0.0_rk) * max(o2, 0.0_rk)
 
          o2_cons_mn_ox = o2_per_mn_ox * mn_ox     ! Consumed O2
          alk_change = alk_per_mn_ox * mn_ox       ! Alkalinity changes

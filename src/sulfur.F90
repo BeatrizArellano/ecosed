@@ -40,8 +40,7 @@ module sulfur
       type(type_diagnostic_variable_id) :: id_sulfide_ox
 
       ! --- Parameters
-      real(rk) :: k_sulfide_ox      ! Maximum sulfide oxidation rate (s-1 internally)
-      real(rk) :: o2_sulfide_ox_sat ! O2 where sulfide oxidation is fully active
+      real(rk) :: k_sulfide_ox      ! Sulfide oxidation rate constant (m3 mmol-1 s-1 internally)
 
    contains
       procedure :: initialize
@@ -55,11 +54,10 @@ contains
       integer,            intent(in)            :: configunit
 
       real(rk), parameter :: d_per_s = 1.0_rk / 86400.0_rk
-      real(rk), parameter :: eps     = 1.0e-12_rk
 
       ! ---------------- Parameters ----------------
-      call self%get_parameter(self%k_sulfide_ox, 'k_sulfide_ox', 'd-1', 'Maximum first-order sulfide oxidation rate', default=5.0_rk, scale_factor=d_per_s, minimum=0.0_rk)
-      call self%get_parameter(self%o2_sulfide_ox_sat, 'o2_sulfide_ox_sat', 'mmol m-3', 'O2 concentration above which sulfide oxidation is fully active', default=0.1_rk, minimum=eps)
+      call self%get_parameter(self%k_sulfide_ox, 'k_sulfide_ox', 'm3 mmol-1 d-1', 'Second-order mass-action rate constant for sulfide oxidation by oxygen', &
+                              default=0.02738_rk, scale_factor=d_per_s, minimum=0.0_rk)
 
       ! ---------------- State variables ----------------
       call self%register_state_variable(self%id_so4, 'so4', 'mmol m-3', &
@@ -91,7 +89,6 @@ contains
       _DECLARE_ARGUMENTS_DO_
 
       real(rk) :: sulfide, o2
-      real(rk) :: fO2, xO2
       real(rk) :: sulfide_ox
       real(rk) :: o2_cons_sulfide_ox
       real(rk) :: alk_change
@@ -120,19 +117,15 @@ contains
          ! using HS-, because HS- dominates dissolved sulfide at seawater pH.
          ! ------------------------------------------------------------------
 
-         ! Sulfide oxidation is represented as first-order in sulfide, with a capped
-         ! maximum rate. Oxygen acts as an activation factor via a smoothstep
-         ! function: oxidation is zero at O2 = 0, increases smoothly at low O2,
-         ! and reaches full activity above a small O2 threshold.
+         ! Sulfide oxidation is represented using second-order mass-action
+         ! kinetics:
          !
-         ! This replaces the standard mass-action formulation (rate ∝ sulfide × O2),
-         ! which can lead to very fast, numerically stiff reactions under oxic
-         ! conditions. The present formulation preserves O2 control while avoiding
-         ! excessive rates and improving numerical stability.
-         xO2 = max(0.0_rk, min(1.0_rk, max(o2, 0.0_rk) / self%o2_sulfide_ox_sat))
-         fO2 = xO2*xO2*xO2 * (xO2 * (6.0_rk*xO2 - 15.0_rk) + 10.0_rk)
-
-         sulfide_ox = self%k_sulfide_ox * fO2 * max(sulfide, 0.0_rk)
+         !   rate = k_sulfide_ox * [sulfide] * [O2]
+         !
+         ! Both sulfide and O2 are dissolved-phase tracers, so no phase
+         ! conversion is needed. The sulfide state variable represents total
+         ! dissolved sulfide, ΣH2S = H2S + HS- + S--.
+         sulfide_ox = self%k_sulfide_ox * max(sulfide, 0.0_rk) * max(o2, 0.0_rk)
 
          o2_cons_sulfide_ox = o2_per_sulfide_ox  * sulfide_ox
          alk_change         = alk_per_sulfide_ox * sulfide_ox

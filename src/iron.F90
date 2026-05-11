@@ -43,8 +43,7 @@ module iron
       type(type_diagnostic_variable_id) :: id_fe_ox
 
       ! --- Parameters
-      real(rk) :: k_fe_ox        ! Maximum Fe2 oxidation rate (s-1 internally)
-      real(rk) :: o2_fe_ox_sat   ! O2 concentration where Fe oxidation is fully active
+      real(rk) :: k_fe_ox        ! Fe(II) oxidation rate constant (m3 mmol-1 s-1 internally)
 
    contains
       procedure :: initialize
@@ -59,13 +58,12 @@ contains
 
       real(rk), parameter :: d_per_s       = 1.0_rk / 86400.0_rk
       real(rk), parameter :: m_d_per_m_s   = 1.0_rk / 86400.0_rk
-      real(rk), parameter :: eps           = 1.0e-12_rk
 
       real(rk) :: w_fe3ox
 
       ! ---------------- Parameters ----------------
-      call self%get_parameter(self%k_fe_ox, 'k_fe_ox', 'd-1', 'Maximum first-order Fe(II) oxidation rate', default=5.0_rk, scale_factor=d_per_s, minimum=0.0_rk)
-      call self%get_parameter(self%o2_fe_ox_sat, 'o2_fe_ox_sat', 'mmol m-3', 'O2 concentration above which Fe(II) oxidation is fully active', default=0.1_rk, minimum=eps)
+      call self%get_parameter(self%k_fe_ox, 'k_fe_ox', 'm3 mmol-1 d-1', 'Second-order mass-action rate constant for Fe(II) oxidation by oxygen', &
+                              default=0.02738_rk, scale_factor=d_per_s, minimum=0.0_rk)
       call self%get_parameter(w_fe3ox, 'w_fe3ox', 'm d-1', 'Sinking velocity of particulate Fe(III) oxides', default=-1.0_rk, scale_factor=m_d_per_m_s)
 
       ! ---------------- State variables ----------------
@@ -97,7 +95,6 @@ contains
       _DECLARE_ARGUMENTS_DO_
 
       real(rk) :: fe2, o2
-      real(rk) :: fO2, xO2
       real(rk) :: fe_ox
       real(rk) :: o2_cons_fe_ox
       real(rk) :: alk_change
@@ -143,19 +140,16 @@ contains
          ! No explicit DIC change: HCO3- is converted to CO2.
          ! ------------------------------------------------------------------       
 
-         ! Fe(II) oxidation is represented as first-order in Fe2, with a capped
-         ! maximum rate. Oxygen acts as an activation factor via a smoothstep
-         ! function: oxidation is zero at O2 = 0, increases smoothly at low O2,
-         ! and reaches full activity above a small O2 threshold.
+         ! Fe(II) oxidation is represented using second-order mass-action
+         ! kinetics:
          !
-         ! This replaces the standard mass-action formulation (rate ∝ Fe2 × O2),
-         ! which can lead to very fast, numerically stiff reactions under oxic
-         ! conditions. The present formulation preserves O2 control of the process
-         ! while avoiding excessive rates and improving numerical stability.         
-         xO2 = max(0.0_rk, min(1.0_rk, max(o2, 0.0_rk) / self%o2_fe_ox_sat))
-         fO2 = xO2*xO2*xO2 * (xO2 * (6.0_rk*xO2 - 15.0_rk) + 10.0_rk)
-
-         fe_ox = self%k_fe_ox * fO2 * max(fe2, 0.0_rk)
+         !   rate = k_fe_ox * [Fe2+] * [O2]
+         !
+         ! Fe2 and O2 are dissolved-phase tracers, so the rate is computed per
+         ! porewater volume in sediments and per water volume in the water column.
+         ! Fe3ox is particulate, so its production is converted from dissolved-
+         ! phase to solid-phase concentration using d2p.
+         fe_ox = self%k_fe_ox * max(fe2, 0.0_rk) * max(o2, 0.0_rk)
 
          o2_cons_fe_ox = o2_per_fe_ox * fe_ox
          alk_change    = alk_per_fe_ox * fe_ox
