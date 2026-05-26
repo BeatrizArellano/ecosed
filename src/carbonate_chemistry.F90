@@ -61,12 +61,13 @@ module carbonate_chemistry
       type(type_diagnostic_variable_id) :: id_co2
       type(type_diagnostic_variable_id) :: id_hco3
       type(type_diagnostic_variable_id) :: id_co3
-      type(type_diagnostic_variable_id) :: id_omega_ca
+      type(type_diagnostic_variable_id) :: id_omega_ca      
 
       ! --- Surface diagnostics
       type(type_surface_diagnostic_variable_id) :: id_co2_flux
       type(type_surface_diagnostic_variable_id) :: id_pco2_sea
       type(type_surface_diagnostic_variable_id) :: id_delta_pco2
+      type(type_surface_diagnostic_variable_id) :: id_atm_co2
    contains
       procedure :: initialize
       procedure :: do
@@ -126,10 +127,12 @@ contains
       call self%register_diagnostic_variable(self%id_hco3,    'hco3',     'mmol C m-3',   'Bicarbonate concentration')
       call self%register_diagnostic_variable(self%id_co3,     'co3',      'mmol C m-3',   'Carbonate concentration')
       call self%register_diagnostic_variable(self%id_omega_ca,'omega_ca', '1',            'Calcite saturation state')
+      
 
       call self%register_surface_diagnostic_variable(self%id_co2_flux, 'co2_flux', 'mmol C m-2 d-1', 'Air-sea CO2 flux')
       call self%register_surface_diagnostic_variable(self%id_pco2_sea, 'pco2_sea',     'uatm',       'Surface ocean pCO2')
       call self%register_surface_diagnostic_variable(self%id_delta_pco2, 'delta_pco2', 'uatm',       'Delta pCO2')
+      call self%register_surface_diagnostic_variable(self%id_atm_co2,    'atm_co2',    'ppm',        'Atmospheric CO2 mole fraction')
 
       ! Dependencies on diagnostic variables to retrieve its latest values computed by this module
       call self%register_dependency(self%id_hplus_prev, 'hplus', 'mmol m-3', 'Previous hydrogen ion concentration')
@@ -368,6 +371,7 @@ contains
          _SET_SURFACE_DIAGNOSTIC_(self%id_co2_flux, flux_co2 * secs_per_day)
          _SET_SURFACE_DIAGNOSTIC_(self%id_pco2_sea, pco2_sea)
          _SET_SURFACE_DIAGNOSTIC_(self%id_delta_pco2, 1.0e6_rk * delta_pco2_atm)
+         _SET_SURFACE_DIAGNOSTIC_(self%id_atm_co2, co2_air)
 
       _SURFACE_LOOP_END_
 
