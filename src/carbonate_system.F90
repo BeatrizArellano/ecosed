@@ -19,11 +19,11 @@ module carbonate_system
    private
 
    ! ---------------- Module parameters ----------------
-   real(rk), parameter, public :: eps_h = 1.0e-20_rk
-   real(rk), parameter, public :: calcon_ref = 1.03e-2_rk   ! Reference [Ca2+] at S=35, mol kg-1
-   real(rk), parameter         :: rgas = 83.14472_rk   
+   real(rk), parameter, public :: eps_h      = 1.0e-20_rk
+   real(rk), parameter, public :: calcon_ref = 0.01026_rk ! Reference [Ca2+] at S=35, mol kg-1
+   real(rk), parameter         :: rgas       = 83.14472_rk   
    integer,  parameter         :: max_iter_h = 20
-   real(rk), parameter         :: h_rel_tol = 1.0e-4_rk
+   real(rk), parameter         :: h_rel_tol  = 1.0e-4_rk
 
    public :: compute_background_totals_from_salinity
    public :: compute_equilibrium_constants
@@ -66,13 +66,14 @@ contains
    ! Units follow CO2SYS conventions (mol kg-1 or derived).
    ! Adapted from CO2Sys and RADIv2 for the inclusion of ammonia and sulfide. 
    ! ------------------------------------------------------------------------------------------
-   subroutine compute_equilibrium_constants(temp, sal, pres, ts, tf, &
-                                            k1, k2, kb, kw, ks, kf, &
-                                            kp1, kp2, kp3, ksi, knh4, kh2s, ksp_ca)
+   subroutine compute_equilibrium_constants(temp, sal, pres, ts, tf,        &
+                                            k1, k2, kb, kw, ks, kf,         &
+                                            kp1, kp2, kp3, ksi, knh4, kh2s, &
+                                            ksp_ca, ksp_ar)
       real(rk), intent(in)  :: temp, sal, pres, ts, tf
       real(rk), intent(out) :: k1, k2, kb, kw, ks, kf
       real(rk), intent(out) :: kp1, kp2, kp3, ksi, knh4, kh2s
-      real(rk), intent(out) :: ksp_ca
+      real(rk), intent(out) :: ksp_ca, ksp_ar
 
       real(rk) :: tk, logtk, sqrt_sal, sal15
       real(rk) :: ion_s, sqrt_ion_s
@@ -85,7 +86,7 @@ contains
       real(rk) :: ln_kp1, ln_kp2, ln_kp3, ln_ksi
       real(rk) :: pknh4, ln_kh2s
       real(rk) :: p_k1, p_k2
-      real(rk) :: log_ksp_ca      
+      real(rk) :: log_ksp_ca, log_ksp_ar      
 
       tk         = temp + 273.15_rk           ! Celsius to Kelvin
       logtk      = log(tk)
@@ -294,6 +295,24 @@ contains
       ksp_ca  = ksp_ca * exp(ln_fac)
 
       ! ------------------------------------------------------------
+      ! Aragonite solubility product (Mucci et al., 1983)
+      ! Adapted from CO2SYS
+      ! ------------------------------------------------------------
+      log_ksp_ar = -171.945_rk - 0.077993_rk * tk + 2903.293_rk / tk + &
+                  71.595_rk * logtk / log(10.0_rk) + &
+                  (-0.068393_rk + 0.0017276_rk * tk + 88.135_rk / tk) * sqrt_sal - &
+                  0.10018_rk * sal + 0.0059415_rk * sal15
+
+      ksp_ar = 10.0_rk ** log_ksp_ar     ! (mol/kg-SW)^2
+
+      ! Pressure correction for aragonite (Millero, 1979), Adapted from CO2sys
+      ! CO2SYS uses deltaV_ar = deltaV_ca + 2.8 and same compressibility as calcite
+      delta_v = (-48.76_rk + 0.5304_rk * temp) + 2.8_rk
+      kappa   = (-11.76_rk + 0.3692_rk * temp) / 1000.0_rk
+      ln_fac  = (-delta_v + 0.5_rk * kappa * pbar) * pbar / rt
+      ksp_ar  = ksp_ar * exp(ln_fac)
+
+      ! ------------------------------------------------------------
       ! Convert to the total pH scale
       ! ------------------------------------------------------------      
       ! The internal system is kept in the total scale
@@ -396,7 +415,7 @@ contains
    !! of dissolved inorganic carbon and other acid-base systems at a given H+.
    !!
    !! The solver uses a safeguarded Newton method in relative/log(H+) form, adapted
-   !! from the PISCES carbonate chemistry solver. The approach combines:
+   !! from CO2sys and PISCES carbonate chemistry solvers. The approach combines:
    !!
    !!   - A Newton-like update expressed as a relative change in H+ (log-space step)
    !!   - Dynamic bracketing to ensure the root remains within a physically valid interval
@@ -488,7 +507,7 @@ contains
       res_absmin = huge(1.0_rk)            ! To store the smallest absolute residual
 
       ! ------ Newton-Raphson iterations with a bisection-method fallback ----------------
-      ! Approach adapted from PISCES
+      ! Approach adapted from CO2sys and PISCES
       do iter = 1, max_iter_h
 
          h_prev = h
@@ -822,13 +841,13 @@ contains
       ! ---------------- Equilibrium constants ----------------
       real(rk) :: k1, k2, kb, kw, ks, kf
       real(rk) :: kp1, kp2, kp3, ksi, knh4, kh2s
-      real(rk) :: ksp_ca, ca
+      real(rk) :: ksp_ca, ksp_ar, ca
 
       ! ---------------- Solver/speciation outputs ----------------
       real(rk) :: h, ph
       real(rk) :: co2_kg, hco3_kg, co3_kg
       real(rk) :: co2_out, hco3_out, co3_out
-      real(rk) :: omega_ca
+      real(rk) :: omega_ca, omega_ar
       real(rk) :: denom
 
       ! ---------------- Initial guess ----------------
@@ -879,7 +898,7 @@ contains
          ! Equilibrium constants
          call compute_equilibrium_constants(temp(i), sal(i), pres(i), ts, tf, &
                                             k1, k2, kb, kw, ks, kf, &
-                                            kp1, kp2, kp3, ksi, knh4, kh2s, ksp_ca)
+                                            kp1, kp2, kp3, ksi, knh4, kh2s, ksp_ca, ksp_ar)
 
          ! Cold-start initial guess
          h_init = -1.0_rk
@@ -905,6 +924,7 @@ contains
          ! Calcite saturation state
          ca = calcon_ref * sal(i) / 35.0_rk
          omega_ca = ca * co3_kg / (ksp_ca + eps_h)
+         omega_ar = ca * co3_kg / (ksp_ar + eps_h)
 
          write(*,*)
          write(*,'(A,A)') 'CASE: ', trim(names(i))
@@ -922,11 +942,13 @@ contains
             'KS=', ks, 'KF=', kf, 'KP1=', kp1, 'KP2=', kp2
          write(*,'(A,ES16.8,2X,A,ES16.8,2X,A,ES16.8,2X,A,ES16.8)') &
             'KP3=', kp3, 'KSi=', ksi, 'KNH4=', knh4, 'KH2S=', kh2s
-         write(*,'(A,ES16.8)') 'Ksp_calcite=', ksp_ca
+         write(*,'(A,ES16.8,2X,A,ES16.8)') &
+               'Ksp_calcite=', ksp_ca, 'Ksp_aragonite=', ksp_ar
 
          write(*,'(A,ES16.8,2X,A,F12.6)') 'H=', h, 'pH=', ph
-         write(*,'(A,F12.6,2X,A,F12.6,2X,A,F12.6,2X,A,F12.6)') &
-            'CO2*=', co2_out, 'HCO3-=', hco3_out, 'CO3--=', co3_out, 'OmegaCa=', omega_ca
+         write(*,'(A,F12.6,2X,A,F12.6,2X,A,F12.6,2X,A,F12.6,2X,A,F12.6)') &
+               'CO2*=', co2_out, 'HCO3-=', hco3_out, 'CO3--=', co3_out, &
+               'OmegaCa=', omega_ca, 'OmegaAr=', omega_ar
 
       end do
 

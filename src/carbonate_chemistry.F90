@@ -61,7 +61,8 @@ module carbonate_chemistry
       type(type_diagnostic_variable_id) :: id_co2
       type(type_diagnostic_variable_id) :: id_hco3
       type(type_diagnostic_variable_id) :: id_co3
-      type(type_diagnostic_variable_id) :: id_omega_ca      
+      type(type_diagnostic_variable_id) :: id_omega_ca     
+      type(type_diagnostic_variable_id) :: id_omega_ar 
 
       ! --- Surface diagnostics
       type(type_surface_diagnostic_variable_id) :: id_co2_flux
@@ -121,12 +122,13 @@ contains
 
       ! ---------------- Diagnostics ----------------
 
-      call self%register_diagnostic_variable(self%id_ph,      'ph',       '1',            'pH')
-      call self%register_diagnostic_variable(self%id_hplus,   'hplus',    'mmol m-3',     'Hydrogen ion concentration')
-      call self%register_diagnostic_variable(self%id_co2,     'co2star',  'mmol C m-3',   'Dissolved CO2* concentration (CO2+H2CO3)')
-      call self%register_diagnostic_variable(self%id_hco3,    'hco3',     'mmol C m-3',   'Bicarbonate concentration')
-      call self%register_diagnostic_variable(self%id_co3,     'co3',      'mmol C m-3',   'Carbonate concentration')
-      call self%register_diagnostic_variable(self%id_omega_ca,'omega_ca', '1',            'Calcite saturation state')
+      call self%register_diagnostic_variable(self%id_ph,       'ph',       '1',           'pH')
+      call self%register_diagnostic_variable(self%id_hplus,    'hplus',    'mmol m-3',    'Hydrogen ion concentration')
+      call self%register_diagnostic_variable(self%id_co2,      'co2star',  'mmol C m-3',  'Dissolved CO2* concentration (CO2+H2CO3)')
+      call self%register_diagnostic_variable(self%id_hco3,     'hco3',     'mmol C m-3',  'Bicarbonate concentration')
+      call self%register_diagnostic_variable(self%id_co3,      'co3',      'mmol C m-3',  'Carbonate concentration')
+      call self%register_diagnostic_variable(self%id_omega_ca, 'omega_ca', '1',           'Calcite saturation state')
+      call self%register_diagnostic_variable(self%id_omega_ar, 'omega_ar', '1',           'Aragonite saturation state')
       
 
       call self%register_surface_diagnostic_variable(self%id_co2_flux, 'co2_flux', 'mmol C m-2 d-1', 'Air-sea CO2 flux')
@@ -153,12 +155,12 @@ contains
       real(rk) :: tb, ts, tf
       real(rk) :: k1, k2, kb, kw, ks, kf
       real(rk) :: kp1, kp2, kp3, ksi, knh4, kh2s
-      real(rk) :: ksp_ca, ca
+      real(rk) :: ksp_ca, ksp_ar, ca
 
       real(rk) :: h, ph
       real(rk) :: h_prev
       real(rk) :: co2_kg, hco3_kg, co3_kg
-      real(rk) :: omega_ca
+      real(rk) :: omega_ca, omega_ar
       real(rk) :: denom
 
       _LOOP_BEGIN_
@@ -207,9 +209,10 @@ contains
          end if
 
          ! ---------------- Equilibrium constants ----------------
-         call compute_equilibrium_constants(temp, sal, pres, ts, tf, &
-                                            k1, k2, kb, kw, ks, kf,  &
-                                            kp1, kp2, kp3, ksi, knh4, kh2s, ksp_ca)
+         call compute_equilibrium_constants(temp, sal, pres, ts, tf,           &
+                                            k1, k2, kb, kw, ks, kf,            &
+                                            kp1, kp2, kp3, ksi, knh4, kh2s,    &
+                                            ksp_ca, ksp_ar)
 
          ! ------------ Solve H+ to compute pH -------------------------
          h = solve_hplus(dic_kg, alk_kg, po4_kg, si_kg, nh4_kg, h2s_kg, &
@@ -224,10 +227,11 @@ contains
          hco3_kg = dic_kg * k1*h    / denom
          co3_kg  = dic_kg * k1*k2   / denom
 
-         ! ---- Calcite saturation state
+         ! ---- Calcite and Aragonite saturation states
          ! Approximate [Ca2+] from reference seawater value scaled by salinity
          ca = calcon_ref * sal / 35.0_rk
          omega_ca = ca * co3_kg / (ksp_ca + eps_h)
+         omega_ar = ca * co3_kg / (ksp_ar + eps_h)
 
          ! --- Save diagnostics converting from mol/kg to mmol m-3 ----------------
          _SET_DIAGNOSTIC_(self%id_ph, ph)
@@ -236,6 +240,7 @@ contains
          _SET_DIAGNOSTIC_(self%id_hco3,  1000.0_rk * rho * hco3_kg)
          _SET_DIAGNOSTIC_(self%id_co3,   1000.0_rk * rho * co3_kg)
          _SET_DIAGNOSTIC_(self%id_omega_ca, omega_ca)
+         _SET_DIAGNOSTIC_(self%id_omega_ar, omega_ar)
 
       _LOOP_END_
 
