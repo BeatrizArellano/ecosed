@@ -54,6 +54,8 @@ module om_degradation
       type(type_diagnostic_variable_id) :: id_ch4_prod
       type(type_diagnostic_variable_id) :: id_alk_prod_ch4
 
+      type(type_diagnostic_variable_id) :: id_alk_prod_rem
+
       ! --- Parameters
       real(rk) :: frac_lab, frac_semi, frac_ref
       real(rk) :: k_remin_pom_l, k_remin_pom_s, k_remin_pom_r  ! Remineralisation rates
@@ -168,8 +170,8 @@ contains
       call self%register_dependency(self%id_pom_prod_n, 'pom_prod_n', 'mmol m-3 s-1', 'Production of particulate organic Matter from pelagic biology')
 
       ! ---------------- Diagnostics ----------------
-      call self%register_diagnostic_variable(self%id_rem, 'REM', 'mmol m-3 d-1', 'Total remineralisation rate of particulate matter.')
-      call self%register_diagnostic_variable(self%id_total_pom, 'total_pom', 'mmol m-3', 'Total particulate organic matter')
+      call self%register_diagnostic_variable(self%id_rem, 'REM', 'mmol N m-3 d-1', 'Total remineralisation rate of particulate matter.')
+      call self%register_diagnostic_variable(self%id_total_pom, 'total_pom', 'mmol N m-3', 'Total particulate organic matter')
       call self%register_diagnostic_variable(self%id_o2_cons_rem, 'O2_CONS_REM', 'mmol m-3 d-1', 'O2 consumption by aerobic remineralisation')
       call self%register_diagnostic_variable(self%id_n_loss_denit, 'NLOSS_DENIT', 'mmol m-3 d-1', 'N loss to N2 by denitrification')
       call self%register_diagnostic_variable(self%id_rem_aer,   'REM_AER',   'mmol N m-3 d-1', 'Aerobic remineralisation rate')
@@ -196,6 +198,8 @@ contains
       call self%register_diagnostic_variable(self%id_alk_prod_aer,   'ALK_PROD_AER',   'mmol eq m-3 d-1', 'Alkalinity production by aerobic remineralisation')
       call self%register_diagnostic_variable(self%id_alk_prod_denit, 'ALK_PROD_DENIT', 'mmol eq m-3 d-1', 'Alkalinity production by denitrification')
       call self%register_diagnostic_variable(self%id_alk_prod_mn,    'ALK_PROD_MN',    'mmol eq m-3 d-1', 'Alkalinity production by Mn oxide reduction')
+
+      call self%register_diagnostic_variable(self%id_alk_prod_rem, 'ALK_PROD_REM', 'mmol eq m-3 d-1', 'Total alkalinity production by organic matter remineralisation')
 
    end subroutine initialize
 
@@ -734,9 +738,9 @@ contains
          if (_AVAILABLE_(self%id_dic)) _ADD_SOURCE_(self%id_dic, dic_prod_rem)         
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_prod_tot)        
 
-         _SET_DIAGNOSTIC_(self%id_rem, rem_total * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_total_pom, pom_l + pom_s + pom_r)
-         _SET_DIAGNOSTIC_(self%id_o2_cons_rem, o2_cons_rem * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_rem,             rem_total * secs_pr_day)         
+         _SET_DIAGNOSTIC_(self%id_o2_cons_rem,   o2_cons_rem * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_n_loss_denit, n_loss_denit * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_rem_aer,   rem_aer_total   * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_rem_denit, rem_denit_total * secs_pr_day)
@@ -745,23 +749,24 @@ contains
          _SET_DIAGNOSTIC_(self%id_mno2_cons_mn, mno2_cons_mn * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_mn2_prod_mn,  mn2_prod_mn  * secs_pr_day)
 
-         _SET_DIAGNOSTIC_(self%id_rem_fe, rem_fe_total * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_rem_fe,         rem_fe_total * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_fe3ox_cons_fe, fe3ox_cons_fe * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_fe2_prod_fe,   fe2_prod_fe   * secs_pr_day)
 
-         _SET_DIAGNOSTIC_(self%id_rem_so4, rem_so4_total * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_so4_cons, so4_cons * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_sulfide_prod, sulfide_prod * secs_pr_day)       
+         _SET_DIAGNOSTIC_(self%id_rem_so4,       rem_so4_total * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_so4_cons,           so4_cons * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_sulfide_prod,   sulfide_prod * secs_pr_day)       
          
-         _SET_DIAGNOSTIC_(self%id_rem_ch4, rem_ch4_total * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_ch4_prod, ch4_prod * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_rem_ch4,       rem_ch4_total * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_ch4_prod,           ch4_prod * secs_pr_day)
 
          _SET_DIAGNOSTIC_(self%id_alk_prod_aer,   p2d * alk_prod_aer   * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_alk_prod_denit, p2d * alk_prod_denit * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_alk_prod_mn,    p2d * alk_prod_mn    * secs_pr_day)
          _SET_DIAGNOSTIC_(self%id_alk_prod_fe,    p2d * alk_prod_fe    * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_alk_prod_so4,   p2d * alk_prod_so4 * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_alk_prod_ch4, p2d * alk_prod_ch4 * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_alk_prod_so4,   p2d * alk_prod_so4   * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_alk_prod_ch4,   p2d * alk_prod_ch4   * secs_pr_day)
+         _SET_DIAGNOSTIC_(self%id_alk_prod_rem,         alk_prod_tot   * secs_pr_day)
 
       _LOOP_END_
    end subroutine do
