@@ -1,7 +1,9 @@
 add_library(fabm_models_ecosed OBJECT
             model_library.F90
+            src/calcium_carbonate.F90
             src/carbonate_chemistry.F90
             src/carbonate_system.F90
+            src/detritus.F90
             src/iron.F90
             src/manganese.F90
             src/methane.F90

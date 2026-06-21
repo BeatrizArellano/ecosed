@@ -2,7 +2,9 @@ module ecosed_model_library
 
    use fabm_types, only: type_base_model_factory, type_base_model
 
+   use calcium_carbonate
    use carbonate_chemistry
+   use detritus
    use iron
    use manganese
    use methane
@@ -33,7 +35,9 @@ contains
       class (type_base_model), pointer :: model
 
       select case (name)
+         case ('calcium_carbonate');   allocate (type_calcium_carbonate::model)
          case ('carbonate_chemistry'); allocate (type_carbonate_chemistry::model)
+         case ('detritus');            allocate (type_detritus::model)
          case ('iron');                allocate (type_iron::model)
          case ('manganese');           allocate (type_manganese::model)
          case ('methane');             allocate (type_methane::model)
