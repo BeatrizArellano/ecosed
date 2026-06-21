@@ -128,8 +128,7 @@ contains
       call self%register_diagnostic_variable(self%id_hco3,     'hco3',     'mmol C m-3',  'Bicarbonate concentration')
       call self%register_diagnostic_variable(self%id_co3,      'co3',      'mmol C m-3',  'Carbonate concentration')
       call self%register_diagnostic_variable(self%id_omega_ca, 'omega_ca', '1',           'Calcite saturation state')
-      call self%register_diagnostic_variable(self%id_omega_ar, 'omega_ar', '1',           'Aragonite saturation state')
-      
+      call self%register_diagnostic_variable(self%id_omega_ar, 'omega_ar', '1',           'Aragonite saturation state')      
 
       call self%register_surface_diagnostic_variable(self%id_co2_flux, 'co2_flux', 'mmol C m-2 d-1', 'Air-sea CO2 flux')
       call self%register_surface_diagnostic_variable(self%id_pco2_sea, 'pco2_sea',     'uatm',       'Surface ocean pCO2')
