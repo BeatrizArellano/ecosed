@@ -7,7 +7,7 @@
 ! Nitrogen uptake is represented using a smooth two-substrate limitation formulation with uptake from
 ! both NH4 and NO3, allowing preferential use of NH4 via the half-saturation terms.
 ! The resulting phytoplankton production is partitioned diagnostically into regenerated production
-! (NH4-supported) and new production (NO3-supported).
+! (NH4-based) and new production (NO3-based).
 !
 ! Phytoplankton biomass is grazed by zooplankton following a Holling-II formulation. Grazed material is
 ! partitioned into sloppy feeding losses (routed to POM), egestion (faecal pellets), 
@@ -33,11 +33,15 @@ module pelagic_ecosystem
       type(type_state_variable_id) :: id_o2
       type(type_state_variable_id) :: id_dic
       type(type_state_variable_id) :: id_alk
+      type(type_state_variable_id) :: id_calcite
 
       ! --- Environmental dependencies
       type(type_dependency_id)          :: id_par      
       type(type_dependency_id)          :: id_temp
       type(type_dependency_id)          :: id_porosity
+
+      ! --- Internal dependencies
+      type(type_dependency_id)          :: id_omega_ca
 
       ! --- Diagnostics
       type(type_diagnostic_variable_id) :: id_TPP, id_GRAZE
@@ -46,6 +50,9 @@ module pelagic_ecosystem
       type(type_diagnostic_variable_id) :: id_pom_prod_n           ! Total biologically produced POM (N-based)
       type(type_diagnostic_variable_id) :: id_chl_diag             ! Diagnosed chlorophyll when photoacclimation is disabled
       type(type_diagnostic_variable_id) :: id_new_prod, id_reg_prod
+      type(type_diagnostic_variable_id) :: id_alk_pp
+      type(type_diagnostic_variable_id) :: id_alk_resp
+      type(type_diagnostic_variable_id) :: id_alk_calcite
 
       ! --- Parameters
       real(rk) :: mu_max                 ! Maximum phytoplankton growth rate at reference temperature
@@ -70,7 +77,13 @@ module pelagic_ecosystem
       real(rk) :: n_to_p          ! mol N per mol P in phytoplankton and zooplankton
       real(rk) :: o2_per_c        ! mol O2 per C produced/respired
 
+      ! Calcite precipitation
+      real(rk) :: rain_ratio      ! Prescribed CaCO3:POC rain ratio
+      ! Optic properties
       real(rk) :: kc              ! specific light extinction [m2 mmol-1] applied to phy + POM pools
+      ! Save diagnostics?
+      logical  :: save_process_rates
+      logical  :: save_alkalinity_changes
 
    contains
       procedure :: initialize
@@ -117,10 +130,15 @@ contains
       call self%get_parameter(self%n_to_p, 'n_to_p', '-', 'Phytoplankton and zooplankton molar N:P ratio', default=16.0_rk)
       call self%get_parameter(self%o2_per_c,  'o2_per_c',  'mol O2 mol C-1', 'Effective O2 produced/consumed per C fixed/respired', default=1.3_rk)
 
+      call self%get_parameter(self%rain_ratio, 'rain_ratio', '-', 'Calcite:POC rain ratio', default=0.0_rk, minimum=0.0_rk)
+
       call self%get_parameter(self%kc,'kc','m2 mmol-1','specific light extinction of Phytoplankton', default=0.03_rk)
 
       ! sinking speeds for phytoplankton (m d-1 in config, scaled to m s-1)
       call self%get_parameter(w_phy,'w_phy','m d-1','vertical velocity of Phy (<0 sinking)', default=0.0_rk, scale_factor=d_per_s)
+
+      call self%get_parameter(self%save_process_rates, 'process_rates', '', 'Save process-rate diagnostics', default=.false.)
+      call self%get_parameter(self%save_alkalinity_changes, 'alkalinity_changes', '', 'Save alkalinity-change diagnostics', default=.false.)
 
       ! ---------------- State variables ----------------      
       call self%register_state_variable(self%id_phy,   'phy',   'mmol N m-3', 'Phytoplankton',   1.0e-12_rk, minimum=0.0_rk, vertical_movement=w_phy)
@@ -142,24 +160,36 @@ contains
       call self%register_state_dependency(self%id_po4, 'po4', 'mmol m-3', 'Dissolved phosphate', required=.true.)
       call self%register_state_dependency(self%id_o2,  'o2',  'mmol m-3', 'Dissolved oxygen', required=.false.)
       call self%register_state_dependency(self%id_dic, 'dic', 'mmol C m-3', 'Total dissolved inorganic carbon', required=.false.)
-      call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.)      
+      call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.)   
+      call self%register_state_dependency(self%id_calcite, 'calcite', 'mmol m-3', 'Calcite CaCO3', required=.false.)   
 
       ! ---------------- Diagnostics ----------------
-      call self%register_diagnostic_variable(self%id_TPP,   'TPP',   'mmol N m-3 d-1', 'Total Primary Production (N-based)')
-      call self%register_diagnostic_variable(self%id_GRAZE, 'GRAZE', 'mmol N m-3 d-1', 'Grazing rate (N-based)')
-      call self%register_diagnostic_variable(self%id_o2_prod, 'O2_PROD', 'mmol m-3 d-1', 'O2 production from primary production')
-      call self%register_diagnostic_variable(self%id_o2_cons, 'O2_CONS', 'mmol m-3 d-1', 'Total O2 consumption')
       call self%register_diagnostic_variable(self%id_pom_prod_n, 'pom_prod_n', 'mmol N m-3 s-1', 'Production rate of particulate organic matter from pelagic biology')
-      call self%register_diagnostic_variable(self%id_new_prod, 'NEW_PP', 'mmol N m-3 d-1', 'New production (NO3-supported)')
-      call self%register_diagnostic_variable(self%id_reg_prod, 'REG_PP', 'mmol N m-3 d-1', 'Regenerated production (NH4-supported)')
       if (.not. self%photoacclimation) then
          call self%register_diagnostic_variable(self%id_chl_diag, 'chl', 'mg m-3','Chlorophyll diagnosed from phytoplankton biomass')
+      end if
+      if (self%save_process_rates) then
+         call self%register_diagnostic_variable(self%id_TPP,   'TPP',   'mmol N m-3 d-1', 'Total Primary Production (N-based)')
+         call self%register_diagnostic_variable(self%id_GRAZE, 'GRAZE', 'mmol N m-3 d-1', 'Grazing rate (N-based)')
+         call self%register_diagnostic_variable(self%id_o2_prod, 'O2_PROD', 'mmol m-3 d-1', 'O2 production from primary production')
+         call self%register_diagnostic_variable(self%id_o2_cons, 'O2_CONS', 'mmol m-3 d-1', 'Total O2 consumption')      
+         call self%register_diagnostic_variable(self%id_new_prod, 'NEW_PP', 'mmol N m-3 d-1', 'New production (NO3-supported)')
+         call self%register_diagnostic_variable(self%id_reg_prod, 'REG_PP', 'mmol N m-3 d-1', 'Regenerated production (NH4-supported)')      
+      end if
+
+      if (self%save_alkalinity_changes) then
+         call self%register_diagnostic_variable(self%id_alk_pp, 'ALK_PP', 'mmol eq m-3 d-1', 'Alkalinity change due to primary production')
+         call self%register_diagnostic_variable(self%id_alk_resp, 'ALK_RESP', 'mmol eq m-3 d-1', 'Alkalinity change due to zooplankton respiration and excretion')
+         if (_AVAILABLE_(self%id_calcite)) then
+            call self%register_diagnostic_variable(self%id_alk_calcite, 'ALK_CALC_PRECIP', 'mmol eq m-3 d-1', 'Alkalinity change due to biotic calcite precipitation')
+         end if
       end if
 
       ! ---------------- Environmental dependencies ----------------
       call self%register_dependency(self%id_par, standard_variables%downwelling_photosynthetic_radiative_flux)
       call self%register_dependency(self%id_temp, standard_variables%temperature)
       call self%register_dependency(self%id_porosity, type_interior_standard_variable(name='porosity', units='1'), required=.false.)
+      call self%register_dependency(self%id_omega_ca, 'omega_ca', '1', 'Calcite saturation state', required=.false.)
 
       ! light attenuation feedback (PHY + POM)
       call self%add_to_aggregate_variable(standard_variables%attenuation_coefficient_of_photosynthetic_radiative_flux, self%id_phy,   scale_factor=self%kc)
@@ -169,33 +199,37 @@ contains
       class(type_pelagic_ecosystem), intent(in) :: self
       _DECLARE_ARGUMENTS_DO_
 
-      real(rk)            :: phy, chl, zoo
-      real(rk)            :: chl_diag
-      real(rk)            :: no3, nh4, po4
-      real(rk)            :: par, temp, phi
+      real(rk) :: phy, chl, zoo
+      real(rk) :: chl_diag
+      real(rk) :: no3, nh4, po4
+      real(rk) :: par, temp, phi
 
-      real(rk)            :: fN, fnut, fT, mu_T, alphaI
-      real(rk)            :: dno3, dnh4, dpo4
-      real(rk)            :: lim_nh4, lim_no3, denom_n, lim_po4
-      real(rk)            :: tpp, new_prod, reg_prod
-      real(rk)            :: theta, cphy, fch, jden
-      real(rk)            :: chl_prod, chl_loss
-      real(rk)            :: phy_source
-      real(rk)            :: graze
-      real(rk)            :: mort_p, mort_z
-      real(rk)            :: dic_change, alk_change, o2_change
-      real(rk)            :: ing_n, ing_c
-      real(rk)            :: sloppy_n
-      real(rk)            :: assim_n, assim_c
-      real(rk)            :: egestion_n
-      real(rk)            :: grow_n_pot, grow_c_pot
-      real(rk)            :: zoo_growth
-      real(rk)            :: zoo_excr_n, zoo_excr_p
-      real(rk)            :: zoo_resp_c
-      real(rk)            :: pom_prod_n
-      real(rk)            :: o2_prod, o2_cons_resp
-      real(rk)            :: phy_kill, zoo_kill, chl_kill
-      logical             :: is_sediment
+      real(rk) :: fN, fnut, fT, mu_T, alphaI
+      real(rk) :: dno3, dnh4, dpo4
+      real(rk) :: lim_nh4, lim_no3, denom_n, lim_po4
+      real(rk) :: tpp, new_prod, reg_prod
+      real(rk) :: theta, cphy, fch, jden
+      real(rk) :: chl_prod, chl_loss
+      real(rk) :: phy_source
+      real(rk) :: graze
+      real(rk) :: mort_p, mort_z
+      real(rk) :: dic_change, alk_change, o2_change
+      real(rk) :: alk_pp_change, alk_resp_change, alk_calc_change
+      real(rk) :: ing_n, ing_c
+      real(rk) :: sloppy_n
+      real(rk) :: assim_n, assim_c
+      real(rk) :: egestion_n
+      real(rk) :: grow_n_pot, grow_c_pot
+      real(rk) :: zoo_growth
+      real(rk) :: zoo_excr_n, zoo_excr_p
+      real(rk) :: zoo_resp_c
+      real(rk) :: pom_prod_n, pom_prod_c
+      real(rk) :: o2_prod, o2_cons_resp
+      real(rk) :: phy_kill, zoo_kill, chl_kill
+      real(rk) :: omega_ca
+      real(rk) :: calcite_rain_ratio, calcite_prod
+      logical  :: do_calcification
+      logical  :: is_sediment
 
       real(rk), parameter :: secs_pr_day = 86400.0_rk
       real(rk), parameter :: k_sed_kill_phy = 200.0_rk * (1.0_rk/secs_pr_day)        ! Rapid removal of phytoplankton in sediments
@@ -227,9 +261,13 @@ contains
          ! phi=1 in water layers and phi<1 in sediment layers.
          is_sediment = (phi < 1.0_rk - eps)
 
-         
-         if (.not. is_sediment) then
-                     ! In the water column   
+         calcite_rain_ratio = 0.0_rk
+         calcite_prod       = 0.0_rk
+         omega_ca           = 0.0_rk
+         pom_prod_c         = 0.0_rk
+
+         ! In the water column   
+         if (.not. is_sediment) then            
             !-------------------------------------------------------------------
             !                 Phytoplankton and Chlorophyll
             !-------------------------------------------------------------------
@@ -377,6 +415,32 @@ contains
             ! Total particulate matter is produced from feeding losses, egestion, and mortality
             pom_prod_n = sloppy_n + egestion_n + mort_p + mort_z
 
+            pom_prod_c = self%c_to_n_phy * (sloppy_n + egestion_n + mort_p) &
+                       + self%c_to_n_zoo * mort_z
+
+
+            !-------------------------------------------------
+            ! Calcite precipitated as prescribed PIC:POC rain ratio
+            ! only under supersaturated conditions.
+            !
+            ! Ca2+ + CO3-- -> CaCO3
+            ! 1 mol DIC and 2 mol eq ALK consumed per mol CaCO3
+            !-------------------------------------------------
+            do_calcification = self%rain_ratio > 0.0_rk .and. &
+                              _AVAILABLE_(self%id_calcite) .and. &
+                              _AVAILABLE_(self%id_omega_ca) .and. &
+                              _AVAILABLE_(self%id_dic) .and. &
+                              _AVAILABLE_(self%id_alk)
+
+            if (do_calcification) then
+               _GET_(self%id_omega_ca, omega_ca)
+
+               if (omega_ca > 1.0_rk) then
+                  calcite_rain_ratio = self%rain_ratio
+                  calcite_prod       = calcite_rain_ratio * pom_prod_c
+               end if
+            end if
+
             !--------------------------------------------------------------------------
             !               Tendencies (all in s-1) 
             !--------------------------------------------------------------------------
@@ -394,7 +458,7 @@ contains
 
             ! Changes in DIC
             ! DIC decreases through phytoplankton carbon fixation and increases through zooplankton respiration.
-            dic_change = -self%c_to_n_phy * tpp + zoo_resp_c     
+            dic_change = -self%c_to_n_phy * tpp + zoo_resp_c - calcite_prod 
 
             ! Changes in Alkalinity
             ! New production removes NO3- increasing alkalinity, while consumption of NH4 decreases it. 
@@ -402,9 +466,11 @@ contains
             ! PP (NO3): CO2 + n/c HNO3 + p/c H3PO4 + (1+n)H2O → (CH2O)(NH3)n(H3PO4)p + (1+2n)O2  Alk change:	p/c + n/c per mol C or p/n+1 per mol N
             ! PP (NH4): CO2 + n/c NH3 + p/c H3PO4 + H2O → (CH2O)(NH3)n(H3PO4)p + O2 Alk change: p/c-n/c per mol C or p/n-1 per mol N 
             ! Respiration: (CH2O)(NH3)n/c(H3PO4)p/c + O2 → CO2 + n/c NH3 + p/c H3PO4 + H2O 	Alk change: n/c - p/c per mol C or 1-p/n per mol N
-            alk_change = (1.0_rk + 1.0_rk/self%n_to_p) * new_prod  &
-                       + (-1.0_rk + 1.0_rk/self%n_to_p) * reg_prod &
-                       + zoo_excr_n - zoo_excr_p
+            alk_pp_change   = (1.0_rk + 1.0_rk/self%n_to_p) * new_prod  &
+                            + (-1.0_rk + 1.0_rk/self%n_to_p) * reg_prod
+            alk_resp_change = zoo_excr_n - zoo_excr_p
+            alk_calc_change = -2.0_rk * calcite_prod
+            alk_change      = alk_pp_change + alk_resp_change + alk_calc_change
 
             ! Changes in O2
             ! O2 is produced during phytoplankton growth and consumed during zooplankton respiration.
@@ -430,24 +496,27 @@ contains
             end if
 
             ! No active pelagic biology in sediments
-            tpp         = 0.0_rk
-            new_prod    = 0.0_rk
-            reg_prod    = 0.0_rk
-            graze       = 0.0_rk
-            mort_p      = 0.0_rk
-            zoo_growth  = 0.0_rk
-            zoo_excr_n  = 0.0_rk
-            zoo_excr_p  = 0.0_rk
-            zoo_resp_c  = 0.0_rk
-            dno3        = 0.0_rk
-            dnh4        = 0.0_rk
-            dpo4        = 0.0_rk
-            dic_change  = 0.0_rk
-            alk_change  = 0.0_rk
-            o2_prod     = 0.0_rk
-            o2_cons_resp= 0.0_rk
-            o2_change   = 0.0_rk
-            chl_prod    = 0.0_rk
+            tpp             = 0.0_rk
+            new_prod        = 0.0_rk
+            reg_prod        = 0.0_rk
+            graze           = 0.0_rk
+            mort_p          = 0.0_rk
+            zoo_growth      = 0.0_rk
+            zoo_excr_n      = 0.0_rk
+            zoo_excr_p      = 0.0_rk
+            zoo_resp_c      = 0.0_rk
+            dno3            = 0.0_rk
+            dnh4            = 0.0_rk
+            dpo4            = 0.0_rk
+            dic_change      = 0.0_rk
+            alk_change      = 0.0_rk
+            alk_pp_change   = 0.0_rk
+            alk_resp_change = 0.0_rk
+            alk_calc_change = 0.0_rk
+            o2_prod         = 0.0_rk
+            o2_cons_resp    = 0.0_rk
+            o2_change       = 0.0_rk
+            chl_prod        = 0.0_rk
 
             ! Dead pelagic biomass becomes POM (N-based)
             pom_prod_n = phy_kill + zoo_kill
@@ -475,20 +544,32 @@ contains
 
          ! ---------------- Optional couplings ----------------
          ! Changes in O2, DIC and alkalinity
-         if (_AVAILABLE_(self%id_dic)) _ADD_SOURCE_(self%id_dic, dic_change)
-         if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_change)
-         if (_AVAILABLE_(self%id_o2))  _ADD_SOURCE_(self%id_o2,  o2_change)   
+         if (_AVAILABLE_(self%id_dic))     _ADD_SOURCE_(self%id_dic, dic_change)
+         if (_AVAILABLE_(self%id_alk))     _ADD_SOURCE_(self%id_alk, alk_change)
+         if (_AVAILABLE_(self%id_o2))      _ADD_SOURCE_(self%id_o2,  o2_change)   
+         if (_AVAILABLE_(self%id_calcite)) _ADD_SOURCE_(self%id_calcite, calcite_prod)
 
-         ! ---------------- Diagnostics (convert to rates per day) ----------------
-         _SET_DIAGNOSTIC_(self%id_TPP,       tpp*secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_new_prod,  new_prod * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_reg_prod,  reg_prod * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_GRAZE,     graze*secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_o2_prod,   o2_prod * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_o2_cons,   o2_cons_resp * secs_pr_day)
+         ! ---------------- Diagnostics ----------------
          _SET_DIAGNOSTIC_(self%id_pom_prod_n, pom_prod_n)
          if (.not. self%photoacclimation) then
             _SET_DIAGNOSTIC_(self%id_chl_diag, chl_diag)
+         end if
+         ! (convert to rates per day)
+         if (self%save_process_rates) then
+            _SET_DIAGNOSTIC_(self%id_TPP,       tpp      * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_new_prod,  new_prod * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_reg_prod,  reg_prod * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_GRAZE,     graze    * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_o2_prod,   o2_prod  * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_o2_cons,   o2_cons_resp * secs_pr_day)
+         end if         
+
+         if (self%save_alkalinity_changes) then
+            _SET_DIAGNOSTIC_(self%id_alk_pp,   alk_pp_change   * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_alk_resp, alk_resp_change * secs_pr_day)
+            if (_AVAILABLE_(self%id_calcite)) then
+               _SET_DIAGNOSTIC_(self%id_alk_calcite, alk_calc_change * secs_pr_day)
+            end if
          end if
 
       _LOOP_END_

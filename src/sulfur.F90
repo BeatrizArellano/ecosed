@@ -38,9 +38,12 @@ module sulfur
 
       ! --- Diagnostics
       type(type_diagnostic_variable_id) :: id_sulfide_ox
+      type(type_diagnostic_variable_id) :: id_alk_sulfide_ox
 
       ! --- Parameters
       real(rk) :: k_sulfide_ox      ! Sulfide oxidation rate constant (m3 mmol-1 s-1 internally)
+      logical :: save_process_rates
+      logical :: save_alkalinity_changes
 
    contains
       procedure :: initialize
@@ -58,6 +61,9 @@ contains
       ! ---------------- Parameters ----------------
       call self%get_parameter(self%k_sulfide_ox, 'k_sulfide_ox', 'm3 mmol-1 d-1', 'Second-order mass-action rate constant for sulfide oxidation by oxygen', &
                               default=0.02738_rk, scale_factor=d_per_s, minimum=0.0_rk)
+
+      call self%get_parameter(self%save_process_rates, 'process_rates', '', 'Save process-rate diagnostics', default=.false.)
+      call self%get_parameter(self%save_alkalinity_changes, 'alkalinity_changes', '', 'Save alkalinity-change diagnostics', default=.false.)
 
       ! ---------------- State variables ----------------
       call self%register_state_variable(self%id_so4, 'so4', 'mmol m-3', &
@@ -79,7 +85,13 @@ contains
       call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.)
 
       ! ---------------- Diagnostics ----------------
-      call self%register_diagnostic_variable(self%id_sulfide_ox, 'sulfide_ox', 'mmol m-3 d-1', 'Sulfide oxidation rate')
+      if (self%save_process_rates) then
+         call self%register_diagnostic_variable(self%id_sulfide_ox, 'SULFIDE_OX', 'mmol m-3 d-1', 'Sulfide oxidation rate')
+      end if
+      if (self%save_alkalinity_changes) then
+         call self%register_diagnostic_variable(self%id_alk_sulfide_ox, 'ALK_SULFIDE_OX', 'mmol eq m-3 d-1', &
+                                                'Alkalinity change due to sulfide oxidation')
+      end if
 
    end subroutine initialize
 
@@ -137,7 +149,13 @@ contains
 
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_change)
 
-         _SET_DIAGNOSTIC_(self%id_sulfide_ox, sulfide_ox * secs_per_day)
+         if (self%save_process_rates) then
+            _SET_DIAGNOSTIC_(self%id_sulfide_ox, sulfide_ox * secs_per_day)
+         end if
+
+         if (self%save_alkalinity_changes) then
+            _SET_DIAGNOSTIC_(self%id_alk_sulfide_ox, alk_change * secs_per_day)
+         end if
 
       _LOOP_END_
 

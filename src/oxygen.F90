@@ -41,14 +41,12 @@ module oxygen
 
       ! --- Surface dependencies
       type(type_horizontal_dependency_id) :: id_wind
-      type(type_horizontal_dependency_id) :: id_ice_fraction
+      type(type_horizontal_dependency_id) :: id_ice
 
       ! --- Diagnostics
       type(type_surface_diagnostic_variable_id) :: id_o2sat
       type(type_surface_diagnostic_variable_id) :: id_o2flux
 
-      ! --- Parameters
-      logical  :: apply_ice_cover
    contains
       procedure :: initialize
       procedure :: do_surface
@@ -59,8 +57,6 @@ contains
    subroutine initialize(self, configunit)
       class(type_oxygen), intent(inout), target :: self
       integer,            intent(in)            :: configunit
-
-      call self%get_parameter(self%apply_ice_cover, 'apply_ice_cover', '-', 'Reduce gas exchange by sea-ice fraction', default=.false.)
 
       ! Oxygen
       call self%register_state_variable(self%id_o2, 'o2', 'mmol m-3', 'Dissolved oxygen', initial_value=300.0_rk, minimum=0.0_rk)
@@ -74,10 +70,7 @@ contains
       call self%register_dependency(self%id_temp, standard_variables%temperature)
       call self%register_dependency(self%id_sal,  standard_variables%practical_salinity)
       call self%register_dependency(self%id_wind, standard_variables%wind_speed)
-      if (self%apply_ice_cover) then
-        ! Optional sea-ice fraction
-        call self%register_dependency(self%id_ice_fraction, standard_variables%ice_area_fraction, required=.true.)
-      end if
+      call self%register_dependency(self%id_ice, standard_variables%ice_area_fraction, required=.false.)
       
       ! Diagnostics
       call self%register_diagnostic_variable(self%id_o2sat,  'o2_sat', 'mmol m-3', 'Oxygen saturation concentration')
@@ -88,7 +81,7 @@ contains
 
    !-------------------------------------------------
    ! Compute oxygen saturation concentration (mmol m-3)
-   ! and air-sea oxygen flux (mmol m-2 s-1) at 1 atm
+   ! and air-sea oxygen flux (mmol m-2 s-1) assuming atm pressure of 1 atm.
    ! from temperature, salinity, and gas transfer velocity.
    ! Valid range for O2 saturation formulation:
    !   -1.9 <= T <= 40 °C,  0 <= S <= 42 PSU
@@ -102,7 +95,7 @@ contains
       class(type_oxygen), intent(in) :: self
       _DECLARE_ARGUMENTS_DO_SURFACE_
 
-      real(rk) :: o2, temp, sal
+      real(rk) :: o2, temp, sal, temp_sc
       real(rk) :: wind, k_o2, sc_o2, k660
       real(rk) :: o2_sat, o2_flux
       real(rk) :: ice_fraction, open_water
@@ -112,7 +105,7 @@ contains
       real(rk), parameter :: a1 = 3.22014_rk
       real(rk), parameter :: a2 = 4.05010_rk
       real(rk), parameter :: a3 = 4.94457_rk
-      real(rk), parameter :: a4 = -2.56847e-1_rk
+      real(rk), parameter :: a4 = -0.256847_rk
       real(rk), parameter :: a5 = 3.88767_rk
       real(rk), parameter :: b0 = -6.24523e-3_rk
       real(rk), parameter :: b1 = -7.37614e-3_rk
@@ -135,11 +128,8 @@ contains
          _GET_(self%id_sal,  sal)
 
          _GET_SURFACE_(self%id_wind, wind)       ! m s-1
-         if (self%apply_ice_cover) then
-            _GET_SURFACE_(self%id_ice_fraction, ice_fraction)
-         else
-            ice_fraction = 0.0_rk
-         end if
+         ice_fraction = 0.0_rk
+         if (_AVAILABLE_HORIZONTAL_(self%id_ice)) _GET_SURFACE_(self%id_ice, ice_fraction)
 
          ice_fraction = min(max(ice_fraction, 0.0_rk), 1.0_rk)
          open_water   = 1.0_rk - ice_fraction
@@ -150,8 +140,9 @@ contains
          ! temperatures from –2°C to 40°C.
          ! Wanninkhof (2014), Relationship between wind speed and gas exchange over the ocean revisited
          ! --------------------------------------------------------------
-         sc_o2 = 1920.4_rk - 135.6_rk*temp + 5.2122_rk*temp*temp &
-                - 0.10939_rk*temp**3 + 9.3777e-4_rk*temp**4
+         temp_sc = min(40.0_rk, max(-2.0_rk, temp))     ! Limit temperature to Schmidt polynomial validity range
+         sc_o2 = 1920.4_rk - 135.6_rk*temp_sc + 5.2122_rk*temp_sc*temp_sc &
+                - 0.10939_rk*temp_sc**3 + 9.3777e-4_rk*temp_sc**4
 
          ! Gas transfer velocity at Sc = 660, Wanninkhof (2014)
          ! k660 [cm h-1] = 0.251 ws^2
@@ -159,7 +150,7 @@ contains
          k660 = k660 * cmh_to_ms    ! convert to m s-1
 
          ! Oxygen exchange velocity (m/s)
-         k_o2 = k660 * (660.0_rk / sc_o2)**0.5_rk
+         k_o2 = k660 * (sc_o2 / 660.0_rk)**(-0.5_rk)
 
          ! --------------------------------------------------------------
          ! O2 saturation concentration (Garcia & Gordon, 1992)

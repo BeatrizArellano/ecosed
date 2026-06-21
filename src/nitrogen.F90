@@ -1,7 +1,7 @@
 #include "fabm_driver.h"
 
 ! ---------------------------------------------------------------------
-! Nitrigen dissolved species and Nitrification
+! Nitrogen dissolved species and Nitrification
 !
 ! Nitrification: oxidation of ammonium to nitrate
 ! Overall simplified reaction:
@@ -13,11 +13,14 @@
 !   - No direct DIC production (inorganic process)
 !   - Produces acidity (2 H+), thus reduces alkalinity
 !
-! Rate formulation:
+! Rate kinetics:
+!  Water column:
 !   - First-order in NH4
 !   - Enhanced by temperature (Eppley scaling)
 !   - Suppressed under low O2 (smooth threshold)
 !   - Inhibited by light (PAR-dependent)
+!   Sediments:
+!     - Second-order mass-action kinetics: R = k_nit_sed * NH4 * O2
 ! ---------------------------------------------------------------------
 module nitrogen
 
@@ -25,8 +28,6 @@ module nitrogen
    use molecular_diff, only: DIFF_ION_LINEAR, m0_NO3, m1_NO3, m0_NH4, m1_NH4, m0_PO4, m1_PO4
    implicit none
    private
-
-
 
    type, extends(type_base_model), public :: type_nitrogen
       ! --- State variables
@@ -41,13 +42,18 @@ module nitrogen
       ! --- Dependencies
       type(type_dependency_id)     :: id_temp
       type(type_dependency_id)     :: id_par
+      type(type_dependency_id)     :: id_porosity
 
       ! --- Diagnostics
       type(type_diagnostic_variable_id) :: id_nit
+      type(type_diagnostic_variable_id) :: id_alk_nit
 
       !--- Parameters
       real(rk) :: k_nit             ! First-order nitrification rate (s-1 internally)
       real(rk) :: k_par_nit         ! PAR where nitrification is reduced by 50%
+      real(rk) :: k_nit_sed
+      logical  :: save_process_rates
+      logical  :: save_alkalinity_changes
 
    contains
       procedure :: initialize
@@ -64,6 +70,11 @@ contains
 
       call self%get_parameter(self%k_nit, 'k_nit', 'd-1', 'First-order nitrification rate',default=0.05_rk, scale_factor=d_per_s, minimum=0.0_rk)
       call self%get_parameter(self%k_par_nit, 'k_par_nit', 'W m-2', 'PAR at which nitrification is reduced by 50%', default=20.0_rk, minimum=0.0_rk)
+      call self%get_parameter(self%k_nit_sed, 'k_nit_sed', 'm3 mmol-1 d-1', 'Second-order sediment nitrification rate constant', &
+                              default=0.0274_rk, scale_factor=d_per_s, minimum=0.0_rk)
+
+      call self%get_parameter(self%save_process_rates, 'process_rates', '', 'Save process-rate diagnostics', default=.false.)
+      call self%get_parameter(self%save_alkalinity_changes, 'alkalinity_changes', '', 'Save alkalinity-change diagnostics', default=.false.)
 
       ! ---------------- State variables ----------------
       ! --- NO3 ---
@@ -99,9 +110,16 @@ contains
       ! ---------------- Dependencies ----------------
       call self%register_dependency(self%id_temp, standard_variables%temperature)
       call self%register_dependency(self%id_par, standard_variables%downwelling_photosynthetic_radiative_flux)
+      call self%register_dependency(self%id_porosity, type_interior_standard_variable(name='porosity', units='1'), required=.false.)
 
       ! ---------------- Diagnostics ----------------
-      call self%register_diagnostic_variable(self%id_nit, 'NIT', 'mmol m-3 d-1', 'Nitrification rate')
+      if (self%save_process_rates) then
+         call self%register_diagnostic_variable(self%id_nit, 'NIT', 'mmol m-3 d-1', 'Nitrification rate')
+      end if
+
+      if (self%save_alkalinity_changes) then
+         call self%register_diagnostic_variable(self%id_alk_nit, 'ALK_NIT', 'mmol eq m-3 d-1', 'Alkalinity change due to nitrification')
+      end if
 
    end subroutine initialize
 
@@ -112,6 +130,9 @@ contains
       real(rk) :: nh4, temp, par, o2
       real(rk) :: fT, fI, fO2
       real(rk) :: nit, o2_cons_nit, alk_change
+      real(rk) :: phi
+      logical  :: is_water
+      real(rk), parameter :: eps_phi = 1.0e-7_rk
 
       real(rk), parameter :: secs_per_day  = 86400.0_rk
       real(rk), parameter :: o2_nit_thr   = 2.0_rk     ! O2 Threshold to reduce nitrification rapidly
@@ -122,32 +143,58 @@ contains
 
          _GET_(self%id_nh4, nh4)
          _GET_(self%id_temp, temp)         
-         _GET_(self%id_par, par)         
+         _GET_(self%id_par, par)     
+
+         if (_AVAILABLE_(self%id_o2)) then
+            _GET_(self%id_o2, o2)
+         else
+            o2 = 0.0_rk
+         end if
+         
+         if (_AVAILABLE_(self%id_porosity)) then
+            _GET_(self%id_porosity, phi)
+         else
+            phi = 1.0_rk
+         end if
+
+         phi = max(min(phi, 1.0_rk), 0.0_rk)
+
+         if (phi > eps_phi .and. phi < 1.0_rk - eps_phi) then
+            is_water = .false.
+         else
+            is_water = .true.
+         end if
 
          !------------------------------------------------------------------------
          !   Nitrification (NH4 -> NO3)
          !   NH4+ + 2O2 -> NO3- + 2H+ + H2O
          ! Consumes NH4 and O2, produces NO3 (no DIC change, alkalinity decreases).
-         ! First-order in NH4, enhanced by temperature, reduced by low O2 and light.
          !------------------------------------------------------------------------
-         
-         ! Smooth O2 limitation: nitrification declines rapidly below the threshold.
-         if (_AVAILABLE_(self%id_o2)) then
-            _GET_(self%id_o2, o2)
-            fO2 = 0.5_rk * (1.0_rk + tanh((max(o2,0.0_rk) - o2_nit_thr) / o2_nit_width))
-         else
-            fO2 = 1.0_rk
+
+         if (is_water) then
+            ! Water-column nitrification:
+            ! First-order in NH4, enhanced by temperature, reduced by low O2 and light.
+            if (_AVAILABLE_(self%id_o2)) then
+               ! Smooth O2 limitation: nitrification declines rapidly below the threshold.
+               fO2 = 0.5_rk * (1.0_rk + tanh((o2 - o2_nit_thr) / o2_nit_width))
+            else
+               fO2 = 1.0_rk
+            end if
+
+            fT = 1.066_rk ** temp
+            fI = 1.0_rk / (1.0_rk + max(par, 0.0_rk) / self%k_par_nit)
+
+            nit = self%k_nit * fT * fO2 * fI * max(nh4, 0.0_rk)
+
+         else            
+            ! Sediment nitrification:
+            ! Second-order mass-action oxidation of NH4 by O2.
+            ! Units: k_nit_sed [m3 mmol-1 s-1],
+            !        NH4 and O2 [mmol m-3],
+            !        nit [mmol m-3 s-1].
+            nit = self%k_nit_sed * max(nh4, 0.0_rk) * max(o2, 0.0_rk)
+
          end if
-
-         ! Eppley-type temperature scaling
-         fT = 1.066_rk ** temp
-
-         ! Light inhibits nitrification; k_par_nit sets the 50% inhibition level.
-         fI = 1.0_rk / (1.0_rk + max(par, 0.0_rk) / self%k_par_nit)
-
-         ! Nitrification rate(mmol N m-3 s-1): first-order in NH4, modulated by temperature,
-         ! inhibited by light, and suppressed under low-O2 conditions.
-         nit = self%k_nit * fT * fO2 * fI * max(nh4, 0.0_rk)
 
          ! Stoichiometric O2 consumption.
          o2_cons_nit = o2_per_n_nit * nit
@@ -165,11 +212,11 @@ contains
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_change)
 
          ! Diagnostic variables
-         _SET_DIAGNOSTIC_(self%id_nit, nit * secs_per_day)
+         if (self%save_process_rates)      _SET_DIAGNOSTIC_(self%id_nit, nit * secs_per_day)
+         if (self%save_alkalinity_changes) _SET_DIAGNOSTIC_(self%id_alk_nit, alk_change * secs_per_day)
 
       _LOOP_END_
 
    end subroutine do
-
 
 end module nitrogen

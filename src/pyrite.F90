@@ -27,12 +27,12 @@
 !
 ! Notes on kinetics:
 !   - Pyrite formation is represented with mass-action kinetics:
-!       r_form = k_pyrite_form * [Fe2+] * [sulfide]^2
-!     with k_pyrite_form in m6 mmol-2 d-1 before FABM scale conversion.
+!       r_form = k_pyrite_form * [Fe2+] * [sulfide]
+!     with k_pyrite_form in m3 mmol-1 d-1 before scale conversion.
 !
 !   - Pyrite oxidation is represented with mass-action kinetics:
 !       r_ox = k_pyrite_ox_o2 * [pyrite] * [O2]
-!     with k_pyrite_ox_o2 in m3 mmol-1 d-1 before FABM scale conversion.
+!     with k_pyrite_ox_o2 in m3 mmol-1 d-1 before scale conversion.
 ! ---------------------------------------------------------------------
 module pyrite
 
@@ -61,12 +61,14 @@ module pyrite
       ! --- Diagnostics
       type(type_diagnostic_variable_id) :: id_pyrite_form
       type(type_diagnostic_variable_id) :: id_pyrite_ox_o2
-      type(type_diagnostic_variable_id) :: id_alk_chn_pyrite_form
-      type(type_diagnostic_variable_id) :: id_alk_chn_pyrite_ox
+      type(type_diagnostic_variable_id) :: id_alk_pyrite_form
+      type(type_diagnostic_variable_id) :: id_alk_pyrite_ox
 
       ! --- Parameters
-      real(rk) :: k_pyrite_form       ! Lumped pyrite formation, m6 mmol-2 s-1 effectively
+      real(rk) :: k_pyrite_form       ! Lumped pyrite formation, m3 mmol-1 s-1 effectively
       real(rk) :: k_pyrite_ox_o2      ! Pyrite oxidation by O2, m3 mmol-1 s-1 effectively
+      logical  :: save_process_rates
+      logical  :: save_alkalinity_changes
 
    contains
       procedure :: initialize
@@ -93,6 +95,9 @@ contains
 
       call self%get_parameter(w_pyrite, 'w_pyrite', 'm d-1', 'Sinking velocity of particulate pyrite', default=-100.0_rk, scale_factor=m_d_per_m_s)
 
+      call self%get_parameter(self%save_process_rates, 'process_rates', '', 'Save process-rate diagnostics', default=.false.)
+      call self%get_parameter(self%save_alkalinity_changes, 'alkalinity_changes', '', 'Save alkalinity-change diagnostics', default=.false.)
+
       ! ---------------- State variables ----------------
       call self%register_state_variable(self%id_pyrite, 'pyrite', 'mmol m-3', 'Particulate pyrite FeS2', initial_value=0.0_rk, minimum=0.0_rk, vertical_movement=w_pyrite)
       call self%set_variable_property(self%id_pyrite, 'is_solute', .false.)
@@ -109,10 +114,17 @@ contains
       call self%register_state_dependency(self%id_alk,     'alk',     'mmol eq m-3', 'Total alkalinity', required=.false.)
 
       ! ---------------- Diagnostics ----------------
-      call self%register_diagnostic_variable(self%id_pyrite_form, 'pyrite_form', 'mmol m-3 d-1', 'Pyrite formation rate from Fe2 and sulfide')
-      call self%register_diagnostic_variable(self%id_pyrite_ox_o2, 'pyrite_ox_o2', 'mmol m-3 d-1', 'Pyrite oxidation rate by oxygen')
-      call self%register_diagnostic_variable(self%id_alk_chn_pyrite_form, 'alk_pyrite_form', 'mmol eq m-3 d-1', 'Alkalinity change by lumped pyrite formation')
-      call self%register_diagnostic_variable(self%id_alk_chn_pyrite_ox, 'alk_pyrite_ox', 'mmol eq m-3 d-1', 'Alkalinity change by pyrite oxidation')
+      if (self%save_process_rates) then
+         call self%register_diagnostic_variable(self%id_pyrite_form, 'PYRITE_FORM', 'mmol m-3 d-1', 'Pyrite formation rate from Fe2 and sulfide')
+         call self%register_diagnostic_variable(self%id_pyrite_ox_o2, 'PYRITE_OX_O2', 'mmol m-3 d-1', 'Pyrite oxidation rate by oxygen')
+      end if
+
+      if (self%save_alkalinity_changes) then
+         call self%register_diagnostic_variable(self%id_alk_pyrite_form, 'ALK_PYRITE_FORM', 'mmol eq m-3 d-1', &
+                                                'Alkalinity change due to pyrite formation')
+         call self%register_diagnostic_variable(self%id_alk_pyrite_ox, 'ALK_PYRITE_OX', 'mmol eq m-3 d-1', &
+                                                'Alkalinity change due to pyrite oxidation')
+      end if
 
    end subroutine initialize
 
@@ -240,10 +252,15 @@ contains
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_change_pyrite_ox)
 
          ! Diagnostics
-         _SET_DIAGNOSTIC_(self%id_pyrite_form,          pyrite_form * secs_per_day)
-         _SET_DIAGNOSTIC_(self%id_pyrite_ox_o2,         pyrite_ox_o2 * secs_per_day)
-         _SET_DIAGNOSTIC_(self%id_alk_chn_pyrite_form,  alk_change_pyrite_form * secs_per_day)
-         _SET_DIAGNOSTIC_(self%id_alk_chn_pyrite_ox,    alk_change_pyrite_ox * secs_per_day)
+         if (self%save_process_rates) then
+            _SET_DIAGNOSTIC_(self%id_pyrite_form,  pyrite_form * secs_per_day)
+            _SET_DIAGNOSTIC_(self%id_pyrite_ox_o2, pyrite_ox_o2 * secs_per_day)
+         end if
+
+         if (self%save_alkalinity_changes) then
+            _SET_DIAGNOSTIC_(self%id_alk_pyrite_form, alk_change_pyrite_form * secs_per_day)
+            _SET_DIAGNOSTIC_(self%id_alk_pyrite_ox, alk_change_pyrite_ox * secs_per_day)
+         end if
 
       _LOOP_END_
 

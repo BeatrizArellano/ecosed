@@ -30,30 +30,23 @@ module om_degradation
       type(type_dependency_id)     :: id_pom_prod_n
 
       ! --- Diagnostics
-      type(type_diagnostic_variable_id) :: id_rem
       type(type_diagnostic_variable_id) :: id_total_pom
-      type(type_diagnostic_variable_id) :: id_o2_cons_rem
-      type(type_diagnostic_variable_id) :: id_n_loss_denit
+
+      type(type_diagnostic_variable_id) :: id_rem
       type(type_diagnostic_variable_id) :: id_rem_aer
       type(type_diagnostic_variable_id) :: id_rem_denit
       type(type_diagnostic_variable_id) :: id_rem_mn
-      type(type_diagnostic_variable_id) :: id_mno2_cons_mn
-      type(type_diagnostic_variable_id) :: id_mn2_prod_mn
+      type(type_diagnostic_variable_id) :: id_rem_fe
+      type(type_diagnostic_variable_id) :: id_rem_so4
+      type(type_diagnostic_variable_id) :: id_rem_ch4
+      type(type_diagnostic_variable_id) :: id_nloss_denit
+
       type(type_diagnostic_variable_id) :: id_alk_prod_aer
       type(type_diagnostic_variable_id) :: id_alk_prod_denit
       type(type_diagnostic_variable_id) :: id_alk_prod_mn
-      type(type_diagnostic_variable_id) :: id_rem_fe
-      type(type_diagnostic_variable_id) :: id_fe3ox_cons_fe
-      type(type_diagnostic_variable_id) :: id_fe2_prod_fe
       type(type_diagnostic_variable_id) :: id_alk_prod_fe
-      type(type_diagnostic_variable_id) :: id_rem_so4
-      type(type_diagnostic_variable_id) :: id_so4_cons
-      type(type_diagnostic_variable_id) :: id_sulfide_prod
       type(type_diagnostic_variable_id) :: id_alk_prod_so4
-      type(type_diagnostic_variable_id) :: id_rem_ch4
-      type(type_diagnostic_variable_id) :: id_ch4_prod
       type(type_diagnostic_variable_id) :: id_alk_prod_ch4
-
       type(type_diagnostic_variable_id) :: id_alk_prod_rem
 
       ! --- Parameters
@@ -68,7 +61,6 @@ module om_degradation
       real(rk) :: o2_per_c
       real(rk) :: k_o2_aer
       real(rk) :: ki_o2_redox
-      real(rk) :: o2_thr_redox
       real(rk) :: k_no3_denit 
       real(rk) :: ki_no3_redox
       real(rk) :: k_mno2_red
@@ -78,6 +70,9 @@ module om_degradation
       real(rk) :: k_so4_red
       real(rk) :: ki_so4_redox   
       real(rk) :: atten
+
+      logical :: save_process_rates
+      logical :: save_alkalinity_changes
 
    contains
       procedure :: initialize
@@ -117,7 +112,6 @@ contains
 
       call self%get_parameter(self%k_o2_aer, 'k_o2_aer', 'mmol m-3', 'Half-saturation constant for O2 limitation in aerobic remineralisation', default=3.0_rk, minimum=eps)
       call self%get_parameter(self%ki_o2_redox, 'ki_o2_redox', 'mmol m-3', 'Half-saturation constant for O2 inhibition in suboxic remineralisation pathways', default=10.0_rk, minimum=eps)
-      call self%get_parameter(self%o2_thr_redox, 'o2_thr_redox', 'mmol m-3', 'O2 threshold below which suboxic/anoxic remineralisation pathways are allowed', default=10.0_rk, minimum=0.0_rk)
       call self%get_parameter(self%k_no3_denit, 'k_no3_denit', 'mmol m-3', 'Half-saturation constant for NO3 limitation in denitrification', default=30.0_rk, minimum=eps)
       call self%get_parameter(self%k_mno2_red, 'k_mno2_red', 'mmol m-3', 'Half-saturation constant for MnO2 limitation in Mn oxide reduction', default=42.4_rk, minimum=eps)
       call self%get_parameter(self%k_fe3ox_red, 'k_fe3ox_red', 'mmol m-3', 'Half-saturation constant for Fe(III) oxide limitation in Fe oxide reduction', default=100.0_rk, minimum=eps)
@@ -131,6 +125,9 @@ contains
       call self%get_parameter(self%o2_per_c, 'o2_per_c', 'mol O2 mol C-1', 'Effective O2 consumed per mol organic C remineralised aerobically', default=1.3_rk)
       call self%get_parameter(self%atten, 'atten', 'm2 mmol-1', 'specific light extinction of POM', default=0.03_rk)
       call self%get_parameter(w_pom,'w_pom','m d-1','vertical velocity of POM (<0 sinking)', default=-10.0_rk, maximum=0.0_rk, scale_factor=d_per_s)
+
+      call self%get_parameter(self%save_process_rates, 'process_rates', '', 'Save process-rate diagnostics', default=.false.)
+      call self%get_parameter(self%save_alkalinity_changes, 'alkalinity_changes', '', 'Save alkalinity-change diagnostics', default=.false.)
 
       ! ---------------- State variables ----------------
       call self%register_state_variable(self%id_pom_l, 'pom_l', 'mmol N m-3', 'POM labile',      0.001_rk, minimum=0.0_rk, vertical_movement=w_pom)
@@ -169,37 +166,28 @@ contains
       call self%register_dependency(self%id_porosity, type_interior_standard_variable(name='porosity', units='1'), required=.false.)
       call self%register_dependency(self%id_pom_prod_n, 'pom_prod_n', 'mmol m-3 s-1', 'Production of particulate organic Matter from pelagic biology')
 
-      ! ---------------- Diagnostics ----------------
-      call self%register_diagnostic_variable(self%id_rem, 'REM', 'mmol N m-3 d-1', 'Total remineralisation rate of particulate matter.')
+      ! ---------------- Diagnostics ----------------      
       call self%register_diagnostic_variable(self%id_total_pom, 'total_pom', 'mmol N m-3', 'Total particulate organic matter')
-      call self%register_diagnostic_variable(self%id_o2_cons_rem, 'O2_CONS_REM', 'mmol m-3 d-1', 'O2 consumption by aerobic remineralisation')
-      call self%register_diagnostic_variable(self%id_n_loss_denit, 'NLOSS_DENIT', 'mmol m-3 d-1', 'N loss to N2 by denitrification')
-      call self%register_diagnostic_variable(self%id_rem_aer,   'REM_AER',   'mmol N m-3 d-1', 'Aerobic remineralisation rate')
-      call self%register_diagnostic_variable(self%id_rem_denit, 'REM_DENIT', 'mmol N m-3 d-1', 'Denitrification remineralisation rate')
-      call self%register_diagnostic_variable(self%id_rem_mn,    'REM_MN',    'mmol N m-3 d-1', 'Mn oxide reduction remineralisation rate')
+      if (self%save_process_rates) then
+         call self%register_diagnostic_variable(self%id_rem, 'REM', 'mmol N m-3 d-1', 'Total organic matter remineralisation rate')
+         call self%register_diagnostic_variable(self%id_rem_aer, 'REM_AER', 'mmol N m-3 d-1', 'Aerobic remineralisation rate')
+         call self%register_diagnostic_variable(self%id_rem_denit, 'REM_DENIT', 'mmol N m-3 d-1', 'Denitrification remineralisation rate')
+         call self%register_diagnostic_variable(self%id_rem_mn, 'REM_MN', 'mmol N m-3 d-1', 'Mn oxide reduction remineralisation rate')
+         call self%register_diagnostic_variable(self%id_rem_fe, 'REM_FE', 'mmol N m-3 d-1', 'Fe oxide reduction remineralisation rate')
+         call self%register_diagnostic_variable(self%id_rem_so4, 'REM_SO4', 'mmol N m-3 d-1', 'Sulfate reduction remineralisation rate')
+         call self%register_diagnostic_variable(self%id_rem_ch4, 'REM_CH4', 'mmol N m-3 d-1', 'Methanogenic remineralisation rate')
+         call self%register_diagnostic_variable(self%id_nloss_denit, 'NLOSS_DENIT', 'mmol N m-3 d-1', 'N loss to N2 by denitrification')
+      end if
 
-      call self%register_diagnostic_variable(self%id_mno2_cons_mn, 'MNO2_CONS_MN', 'mmol m-3 d-1', 'MnO2 consumption by Mn oxide reduction')
-      call self%register_diagnostic_variable(self%id_mn2_prod_mn,  'MN2_PROD_MN',  'mmol m-3 d-1', 'Mn2 production by Mn oxide reduction')
-
-      call self%register_diagnostic_variable(self%id_rem_fe, 'REM_FE', 'mmol N m-3 d-1', 'Fe oxide reduction remineralisation rate')
-      call self%register_diagnostic_variable(self%id_fe3ox_cons_fe, 'FE3OX_CONS_FE', 'mmol m-3 d-1', 'Fe(III) oxide consumption by Fe oxide reduction')
-      call self%register_diagnostic_variable(self%id_fe2_prod_fe, 'FE2_PROD_FE', 'mmol m-3 d-1', 'Fe2 production by Fe oxide reduction')
-      call self%register_diagnostic_variable(self%id_alk_prod_fe, 'ALK_PROD_FE', 'mmol eq m-3 d-1', 'Alkalinity production by Fe oxide reduction')
-
-      call self%register_diagnostic_variable(self%id_rem_so4, 'REM_SO4', 'mmol N m-3 d-1', 'Sulfate reduction remineralisation rate')
-      call self%register_diagnostic_variable(self%id_so4_cons, 'SO4_CONS', 'mmol m-3 d-1', 'Sulfate consumption')
-      call self%register_diagnostic_variable(self%id_sulfide_prod, 'SULFIDE_PROD', 'mmol m-3 d-1', 'Sulfide production')
-      call self%register_diagnostic_variable(self%id_alk_prod_so4, 'ALK_PROD_SO4', 'mmol eq m-3 d-1', 'Alkalinity production by sulfate reduction')
-
-      call self%register_diagnostic_variable(self%id_rem_ch4, 'REM_CH4', 'mmol N m-3 d-1', 'Methanogenic remineralisation rate')
-      call self%register_diagnostic_variable(self%id_ch4_prod, 'CH4_PROD', 'mmol m-3 d-1', 'Methane production by methanogenesis')
-      call self%register_diagnostic_variable(self%id_alk_prod_ch4, 'ALK_PROD_CH4', 'mmol eq m-3 d-1', 'Alkalinity production by methanogenesis')
-
-      call self%register_diagnostic_variable(self%id_alk_prod_aer,   'ALK_PROD_AER',   'mmol eq m-3 d-1', 'Alkalinity production by aerobic remineralisation')
-      call self%register_diagnostic_variable(self%id_alk_prod_denit, 'ALK_PROD_DENIT', 'mmol eq m-3 d-1', 'Alkalinity production by denitrification')
-      call self%register_diagnostic_variable(self%id_alk_prod_mn,    'ALK_PROD_MN',    'mmol eq m-3 d-1', 'Alkalinity production by Mn oxide reduction')
-
-      call self%register_diagnostic_variable(self%id_alk_prod_rem, 'ALK_PROD_REM', 'mmol eq m-3 d-1', 'Total alkalinity production by organic matter remineralisation')
+      if (self%save_alkalinity_changes) then
+         call self%register_diagnostic_variable(self%id_alk_prod_aer, 'ALK_PROD_AER', 'mmol eq m-3 d-1', 'Alkalinity change due to aerobic remineralisation')
+         call self%register_diagnostic_variable(self%id_alk_prod_denit, 'ALK_PROD_DENIT', 'mmol eq m-3 d-1', 'Alkalinity change due to denitrification')
+         call self%register_diagnostic_variable(self%id_alk_prod_mn, 'ALK_PROD_MN', 'mmol eq m-3 d-1', 'Alkalinity change due to Mn oxide reduction')
+         call self%register_diagnostic_variable(self%id_alk_prod_fe, 'ALK_PROD_FE', 'mmol eq m-3 d-1', 'Alkalinity change due to iron reduction')
+         call self%register_diagnostic_variable(self%id_alk_prod_so4, 'ALK_PROD_SO4', 'mmol eq m-3 d-1', 'Alkalinity change due to sulfate reduction')
+         call self%register_diagnostic_variable(self%id_alk_prod_ch4, 'ALK_PROD_CH4', 'mmol eq m-3 d-1', 'Alkalinity change due to methanogenesis')
+         call self%register_diagnostic_variable(self%id_alk_prod_rem, 'ALK_PROD_REM', 'mmol eq m-3 d-1', 'Net alkalinity change due to organic matter remineralisation')
+      end if
 
    end subroutine initialize
 
@@ -219,7 +207,7 @@ contains
 
       logical  :: is_water
       ! Pathway limiting/inhibition functions
-      real(rk) :: fi_o2_redox
+      real(rk) :: fi_o2_redox, fi_o2_inhib
       real(rk) :: fi_no3_redox
       real(rk) :: fi_mno2_redox, fi_fe3ox_redox, fi_so4_redox
       real(rk) :: fsum, faer, fdenit, fmn, ffe, fso4, fch4
@@ -250,8 +238,10 @@ contains
 
       logical  :: use_mn, use_fe, use_so4, use_ch4
 
-      real(rk), parameter :: secs_pr_day = 86400.0_rk
-      real(rk), parameter :: eps_phi     = 1.0e-7_rk      
+      real(rk), parameter :: secs_pr_day    = 86400.0_rk
+      real(rk), parameter :: o2_redox_width = 1.0_rk     ! mmol m-3
+      real(rk), parameter :: o2_thr_redox   = 25.0_rk    ! mmol m-3
+      real(rk), parameter :: eps_phi        = 1.0e-7_rk      
 
       _LOOP_BEGIN_
 
@@ -340,13 +330,15 @@ contains
          faer = o2 / (self%k_o2_aer + o2)
 
          ! O2 inhibition of suboxic/anoxic remineralisation pathways.
-         ! ki_o2_redox controls the smooth inhibition below the redox threshold.
-         ! o2_thr_redox is an explicit threshold: above it, suboxic/anoxic pathways are inhibited.
-         if (o2 <= self%o2_thr_redox) then
-            fi_o2_redox = self%ki_o2_redox / (self%ki_o2_redox + o2)
-         else
-            fi_o2_redox = 0.0_rk
+         ! In the water column, redox pathways are additionally suppressed above
+         ! a fixed O2 threshold. In sediments, inhibition is controlled only by
+         ! the Monod-type O2 term.
+         if (is_water) then
+            fi_o2_inhib = 0.5_rk * (1.0_rk - tanh((o2 - o2_thr_redox) / o2_redox_width))
+         else 
+            fi_o2_inhib = 1.0_rk
          end if
+         fi_o2_redox = fi_o2_inhib * self%ki_o2_redox / (self%ki_o2_redox + o2)
 
          ! -------------------------------------------------------------------------
          ! Sequential redox inhibition factors.
@@ -739,34 +731,27 @@ contains
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_prod_tot)        
 
          _SET_DIAGNOSTIC_(self%id_total_pom, pom_l + pom_s + pom_r)
-         _SET_DIAGNOSTIC_(self%id_rem,             rem_total * secs_pr_day)         
-         _SET_DIAGNOSTIC_(self%id_o2_cons_rem,   o2_cons_rem * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_n_loss_denit, n_loss_denit * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_rem_aer,   rem_aer_total   * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_rem_denit, rem_denit_total * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_rem_mn,    rem_mn_total    * secs_pr_day)
 
-         _SET_DIAGNOSTIC_(self%id_mno2_cons_mn, mno2_cons_mn * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_mn2_prod_mn,  mn2_prod_mn  * secs_pr_day)
+         if (self%save_process_rates) then
+            _SET_DIAGNOSTIC_(self%id_rem,         rem_total       * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_rem_aer,     rem_aer_total   * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_rem_denit,   rem_denit_total * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_rem_mn,      rem_mn_total    * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_rem_fe,      rem_fe_total    * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_rem_so4,     rem_so4_total   * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_rem_ch4,     rem_ch4_total   * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_nloss_denit, n_loss_denit    * secs_pr_day)
+         end if
 
-         _SET_DIAGNOSTIC_(self%id_rem_fe,         rem_fe_total * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_fe3ox_cons_fe, fe3ox_cons_fe * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_fe2_prod_fe,   fe2_prod_fe   * secs_pr_day)
-
-         _SET_DIAGNOSTIC_(self%id_rem_so4,       rem_so4_total * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_so4_cons,           so4_cons * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_sulfide_prod,   sulfide_prod * secs_pr_day)       
-         
-         _SET_DIAGNOSTIC_(self%id_rem_ch4,       rem_ch4_total * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_ch4_prod,           ch4_prod * secs_pr_day)
-
-         _SET_DIAGNOSTIC_(self%id_alk_prod_aer,   p2d * alk_prod_aer   * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_alk_prod_denit, p2d * alk_prod_denit * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_alk_prod_mn,    p2d * alk_prod_mn    * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_alk_prod_fe,    p2d * alk_prod_fe    * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_alk_prod_so4,   p2d * alk_prod_so4   * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_alk_prod_ch4,   p2d * alk_prod_ch4   * secs_pr_day)
-         _SET_DIAGNOSTIC_(self%id_alk_prod_rem,         alk_prod_tot   * secs_pr_day)
+         if (self%save_alkalinity_changes) then
+            _SET_DIAGNOSTIC_(self%id_alk_prod_aer,   p2d * alk_prod_aer   * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_alk_prod_denit, p2d * alk_prod_denit * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_alk_prod_mn,    p2d * alk_prod_mn    * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_alk_prod_fe,    p2d * alk_prod_fe    * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_alk_prod_so4,   p2d * alk_prod_so4   * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_alk_prod_ch4,   p2d * alk_prod_ch4   * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_alk_prod_rem,         alk_prod_tot   * secs_pr_day)
+         end if
 
       _LOOP_END_
    end subroutine do

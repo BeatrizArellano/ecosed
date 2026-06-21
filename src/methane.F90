@@ -39,11 +39,15 @@ module methane
         ! --- Diagnostics
         type(type_diagnostic_variable_id) :: id_ch4_ox      
         type(type_diagnostic_variable_id) :: id_ch4_an
+        type(type_diagnostic_variable_id) :: id_alk_ch4_an
+
         ! --- Parameters
         real(rk) :: k_ch4_ox                 ! Aerobic CH4 oxidation rate constant (m3 mmol-1 s-1 internally)
         real(rk) :: k_ch4_so4                ! Maximum sulfate-AOM rate (s-1 internally)        
         real(rk) :: k_so4_ch4                ! SO4 half-saturation for AOM
         real(rk) :: o2_ch4_anox_thr          ! O2 where AOM is fully suppressed
+        logical  :: save_process_rates
+        logical  :: save_alkalinity_changes
         
     contains
         procedure :: initialize
@@ -65,6 +69,9 @@ contains
         call self%get_parameter(self%k_ch4_so4, 'k_ch4_so4', 'd-1', 'Maximum first-order sulfate-driven methane oxidation rate', default=0.05_rk, scale_factor=d_per_s, minimum=0.0_rk)
         call self%get_parameter(self%k_so4_ch4, 'k_so4_ch4', 'mmol m-3', 'Sulfate half-saturation concentration for anaerobic methane oxidation', default=1600.0_rk, minimum=eps)
         call self%get_parameter(self%o2_ch4_anox_thr, 'o2_ch4_anox_thr', 'mmol m-3', 'O2 concentration above which anaerobic methane oxidation is suppressed', default=1.0_rk, minimum=eps)
+
+        call self%get_parameter(self%save_process_rates, 'process_rates', '', 'Save process-rate diagnostics', default=.false.)
+        call self%get_parameter(self%save_alkalinity_changes, 'alkalinity_changes', '', 'Save alkalinity-change diagnostics', default=.false.)
  
         ! ---------------- State variables ----------------
         call self%register_state_variable(self%id_ch4, 'ch4', 'mmol m-3', 'Dissolved methane', initial_value=0.0_rk, minimum=0.0_rk, no_river_dilution=.true.)
@@ -79,8 +86,14 @@ contains
         call self%register_state_dependency(self%id_dic, 'dic', 'mmol C m-3', 'Dissolved inorganic carbon', required=.false.)
         call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.) 
         ! ---------------- Diagnostics ----------------
-        call self%register_diagnostic_variable(self%id_ch4_ox, 'ch4_ox', 'mmol m-3 d-1', 'Aerobic methane oxidation rate')   
-        call self%register_diagnostic_variable(self%id_ch4_an, 'ch4_an', 'mmol m-3 d-1', 'Anaerobic methane oxidation rate via SO4')
+        if (self%save_process_rates) then
+            call self%register_diagnostic_variable(self%id_ch4_ox, 'CH4_OX', 'mmol m-3 d-1', 'Aerobic methane oxidation rate')
+            call self%register_diagnostic_variable(self%id_ch4_an, 'CH4_AN', 'mmol m-3 d-1', 'Anaerobic methane oxidation rate via SO4')
+        end if
+
+        if (self%save_alkalinity_changes) then
+            call self%register_diagnostic_variable(self%id_alk_ch4_an, 'ALK_CH4_ANOX', 'mmol eq m-3 d-1', 'Alkalinity change due to anaerobic methane oxidation')
+        end if
 
     end subroutine initialize 
 
@@ -112,7 +125,7 @@ contains
             !   CH4 + 2 O2 -> CO2 + 2 H2O
             !
             ! Sulfate-dependent anaerobic oxidation of methane (AOM) is
-            ! carried out by anaerobic microbial consortia and is therefore
+            ! carried out by anaerobic microbial community and is therefore
             ! restricted here to low-O2 conditions:
             !   CH4 + SO4-- -> HCO3- + HS- + H2O
             ! ---------------------------------------------------------------
@@ -144,7 +157,7 @@ contains
             !   - consumes 1 CH4
             !   - consumes 2 O2
             !   - produces 1 DIC
-            !   - no direct alkalinity change
+            !   - No direct alkalinity change
             !
             ! Sulfate-AOM:
             !   - consumes 1 CH4
@@ -162,8 +175,14 @@ contains
             if (_AVAILABLE_(self%id_dic))     _ADD_SOURCE_(self%id_dic,      dic_per_ch4_ox * ch4_ox + dic_per_ch4_an * ch4_an)
             if (_AVAILABLE_(self%id_alk))     _ADD_SOURCE_(self%id_alk,      alk_per_ch4_an * ch4_an)
 
-            _SET_DIAGNOSTIC_(self%id_ch4_ox, ch4_ox * secs_per_day)
-            _SET_DIAGNOSTIC_(self%id_ch4_an, ch4_an * secs_per_day)
+            if (self%save_process_rates) then
+                _SET_DIAGNOSTIC_(self%id_ch4_ox, ch4_ox * secs_per_day)
+                _SET_DIAGNOSTIC_(self%id_ch4_an, ch4_an * secs_per_day)
+            end if
+
+            if (self%save_alkalinity_changes) then
+                _SET_DIAGNOSTIC_(self%id_alk_ch4_an, alk_per_ch4_an * ch4_an * secs_per_day)
+            end if
 
         _LOOP_END_
     end subroutine do
