@@ -41,10 +41,12 @@ module manganese
 
       ! --- Diagnostics
       type(type_diagnostic_variable_id) :: id_mn_ox
+      type(type_diagnostic_variable_id) :: id_alk_mn_ox
 
       ! --- Parameters
-      ! --- Parameters
-      real(rk) :: k_mn_ox        ! Mn(II) oxidation rate constant (m3 mmol-1 s-1 internally)
+      real(rk) :: k_mn_ox                 ! Mn(II) oxidation rate constant (m3 mmol-1 s-1 internally)
+      logical  :: save_process_rates
+      logical  :: save_alkalinity_changes
 
    contains
       procedure :: initialize
@@ -59,7 +61,6 @@ contains
 
       real(rk), parameter :: d_per_s     = 1.0_rk / 86400.0_rk
       real(rk), parameter :: m_d_per_m_s = 1.0_rk / 86400.0_rk
-      real(rk), parameter :: eps         = 1.0e-12_rk
 
       real(rk) :: w_mno2       ! MnO2 sinking velocity (m s-1 internally)
 
@@ -67,6 +68,9 @@ contains
       call self%get_parameter(self%k_mn_ox, 'k_mn_ox', 'm3 mmol-1 d-1', 'Second-order mass-action rate constant for Mn(II) oxidation by oxygen', &
                               default=2.738_rk, scale_factor=d_per_s, minimum=0.0_rk)
       call self%get_parameter(w_mno2, 'w_mno2', 'm d-1', 'Sinking velocity of particulate MnO2', default=-1.0_rk, scale_factor=m_d_per_m_s)
+
+      call self%get_parameter(self%save_process_rates, 'process_rates', '', 'Save process-rate diagnostics', default=.false.)
+      call self%get_parameter(self%save_alkalinity_changes, 'alkalinity_changes', '', 'Save alkalinity-change diagnostics', default=.false.)
 
       ! ---------------- State variables ----------------
       call self%register_state_variable(self%id_mn2, 'mn2', 'mmol m-3', 'Dissolved Mn(II)', initial_value=0.001_rk, minimum=0.0_rk, no_river_dilution=.true.)
@@ -86,7 +90,14 @@ contains
       call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.)
 
       ! ---------------- Diagnostics ----------------
-      call self%register_diagnostic_variable(self%id_mn_ox, 'mn2_ox', 'mmol m-3 d-1', 'Mn(II) oxidation rate')
+      if (self%save_process_rates) then
+         call self%register_diagnostic_variable(self%id_mn_ox, 'MN_OX', 'mmol m-3 d-1', 'Mn(II) oxidation rate')
+      end if
+
+      if (self%save_alkalinity_changes) then
+         call self%register_diagnostic_variable(self%id_alk_mn_ox, 'ALK_MN_OX', 'mmol eq m-3 d-1', &
+                                                'Alkalinity change due to Mn(II) oxidation')
+      end if
 
    end subroutine initialize
 
@@ -146,7 +157,7 @@ contains
          mn_ox = self%k_mn_ox * max(mn2, 0.0_rk) * max(o2, 0.0_rk)
 
          o2_cons_mn_ox = o2_per_mn_ox * mn_ox     ! Consumed O2
-         alk_change = alk_per_mn_ox * mn_ox       ! Alkalinity changes
+         alk_change    = alk_per_mn_ox * mn_ox    ! Alkalinity changes
 
          ! Mn2+ is in the dissolved phase and MnO2 in the solid phase
          ! Therefore multiplying by the conversion factor
@@ -159,7 +170,13 @@ contains
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_change)
 
          ! -- Diagnostics (mmol m-3 d-1)
-         _SET_DIAGNOSTIC_(self%id_mn_ox, mn_ox * secs_per_day)
+         if (self%save_process_rates) then
+            _SET_DIAGNOSTIC_(self%id_mn_ox, mn_ox * secs_per_day)
+         end if
+
+         if (self%save_alkalinity_changes) then
+            _SET_DIAGNOSTIC_(self%id_alk_mn_ox, alk_change * secs_per_day)
+         end if
 
       _LOOP_END_
 
