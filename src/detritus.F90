@@ -47,12 +47,16 @@ module detritus
       real(rk) :: n_to_p_det       ! Detrital molar N:P ratio [-]
       real(rk) :: o2_per_c
       real(rk) :: atten_det        ! Detritus-specific PAR attenuation [m2 mmol N-1]
+      real(rk) :: w_det            ! Detritus settling velocity [m s-1 internally]
+      logical  :: settling         ! Enable detritus settling and seabed loss
+
       logical  :: save_process_rates
       logical  :: save_alkalinity_changes
-
+      
    contains
       procedure :: initialize
       procedure :: do
+      procedure :: do_bottom
    end type type_detritus
 
 contains
@@ -63,7 +67,6 @@ contains
 
       real(rk), parameter :: d_per_s = 1.0_rk / 86400.0_rk
       real(rk), parameter :: eps     = 1.0e-12_rk
-      real(rk) :: w_det
 
       ! ---------------- Parameters ----------------
       call self%get_parameter(self%k_remin_det, 'k_remin_det', 'd-1', 'First-order detritus remineralisation rate', default=0.05_rk, &
@@ -74,8 +77,9 @@ contains
 
       call self%get_parameter(self%o2_per_c, 'o2_per_c', 'mol O2 mol C-1', 'Effective O2 consumed per mol organic C remineralised aerobically', default=1.3_rk, minimum=0.0_rk)
 
-      call self%get_parameter(w_det, 'w_det', 'm d-1', 'Vertical velocity of detritus (<0 sinking)', default=-5.0_rk, &
+      call self%get_parameter(self%w_det, 'w_det', 'm d-1', 'Vertical velocity of detritus (<0 sinking)', default=-5.0_rk, &
                               maximum=0.0_rk, scale_factor=d_per_s)
+      call self%get_parameter(self%settling, 'settling', '', 'Enable detritus settling and loss to abstract sediment', default=.false.)
 
       call self%get_parameter(self%atten_det, 'atten_det', 'm2 mmol-1', 'Specific light extinction of detritus', default=0.03_rk, minimum=0.0_rk)
 
@@ -83,7 +87,7 @@ contains
       call self%get_parameter(self%save_alkalinity_changes, 'alkalinity_changes', '', 'Save alkalinity-change diagnostics', default=.false.)
 
       ! ---------------- State variables ----------------
-      call self%register_state_variable(self%id_det, 'det', 'mmol N m-3', 'Detritus', initial_value=0.001_rk, minimum=0.0_rk, vertical_movement=w_det)
+      call self%register_state_variable(self%id_det, 'det', 'mmol N m-3', 'Detritus', initial_value=0.001_rk, minimum=0.0_rk, vertical_movement=self%w_det)
       call self%set_variable_property(self%id_det, 'is_solute', .false.)
 
       ! Detritus contributes to total nitrogen conservation.
@@ -177,5 +181,29 @@ contains
       _LOOP_END_
 
    end subroutine do
+
+
+   subroutine do_bottom(self, _ARGUMENTS_DO_BOTTOM_)
+      class(type_detritus), intent(in) :: self
+      _DECLARE_ARGUMENTS_DO_BOTTOM_
+
+      real(rk) :: det
+      real(rk) :: fsettle
+
+      if (.not. self%settling) return
+
+      _BOTTOM_LOOP_BEGIN_
+
+         _GET_(self%id_det, det)
+
+         ! Settling velocity is negative for downward movement.
+         ! Bottom flux is positive into water, so settling loss is negative.
+         fsettle = max(0.0_rk, -self%w_det) * max(det, 0.0_rk)
+
+         _ADD_BOTTOM_FLUX_(self%id_det, -fsettle)
+
+      _BOTTOM_LOOP_END_
+
+   end subroutine do_bottom
 
 end module detritus
