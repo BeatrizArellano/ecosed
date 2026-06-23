@@ -35,6 +35,7 @@ module detritus
 
       ! --- Dependency provided by pelagic_ecosystem
       type(type_dependency_id) :: id_pom_prod_n
+      type(type_dependency_id) :: id_temp
 
       ! --- Diagnostics
       type(type_diagnostic_variable_id) :: id_total_det
@@ -43,6 +44,7 @@ module detritus
 
       ! --- Parameters
       real(rk) :: k_remin_det      ! Detritus remineralisation rate [s-1 internally]
+      real(rk) :: k_o2_aer         ! Half-saturation constant for O2 limitation
       real(rk) :: c_to_n_det       ! C:N ratio [-]
       real(rk) :: n_to_p_det       ! Detrital molar N:P ratio [-]
       real(rk) :: o2_per_c
@@ -71,6 +73,7 @@ contains
       ! ---------------- Parameters ----------------
       call self%get_parameter(self%k_remin_det, 'k_remin_det', 'd-1', 'First-order detritus remineralisation rate', default=0.05_rk, &
                               scale_factor=d_per_s, minimum=0.0_rk)
+      call self%get_parameter(self%k_o2_aer, 'k_o2_aer', 'mmol m-3', 'Half-saturation constant for O2 limitation during remineralisation', default=3.0_rk, minimum=eps)
 
       call self%get_parameter(self%c_to_n_det, 'c_to_n_det', '-', 'Detrital molar C:N ratio', default=6.625_rk, minimum=eps)
       call self%get_parameter(self%n_to_p_det, 'n_to_p_det', '-', 'Detrital molar N:P ratio', default=16.0_rk, minimum=eps)
@@ -106,6 +109,7 @@ contains
       call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.)
 
       ! ---------------- Dependencies ----------------
+      call self%register_dependency(self%id_temp, standard_variables%temperature)
       ! This is provided by pelagic_ecosystem as a diagnostic in N units.
       call self%register_dependency(self%id_pom_prod_n, 'pom_prod_n', 'mmol N m-3 s-1', 'Production of particulate organic matter from pelagic biology',required=.false.)
 
@@ -128,6 +132,8 @@ contains
       real(rk) :: det
       real(rk) :: pom_prod_n
       real(rk) :: remin_n, remin_c, remin_p
+      real(rk) :: temp, fT
+      real(rk) :: o2, faer
       real(rk) :: o2_cons_aer
       real(rk) :: alk_prod_aer
 
@@ -141,8 +147,20 @@ contains
             _GET_(self%id_pom_prod_n, pom_prod_n)
          end if
 
+         _GET_(self%id_temp, temp)
+         ! Eppley-style temperature scaling of remineralisation.
+         fT = 1.066_rk ** temp
+
+         ! O2 limitation. If oxygen is not coupled, assume fully aerobic conditions.
+         faer = 1.0_rk
+         if (_AVAILABLE_(self%id_o2)) then
+            _GET_(self%id_o2, o2)
+            o2   = max(o2, 0.0_rk)
+            faer = o2 / (self%k_o2_aer + o2)
+         end if
+
          ! Linear remineralisation in N units.
-         remin_n = self%k_remin_det * max(det, 0.0_rk)
+         remin_n = self%k_remin_det * fT * faer * max(det, 0.0_rk)
          remin_c = self%c_to_n_det * remin_n
          remin_p = remin_n / self%n_to_p_det  
          
