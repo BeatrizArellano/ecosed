@@ -12,7 +12,7 @@
 ! Coupling logic:
 !   - pelagic_ecosystem provides diagnostic pom_prod_n [mmol N m-3 s-1]
 !   - this module stores that production as detritus
-!   - detritus remineralises linearly to NH4 and PO4 using fixed N:P stoichiometry
+!   - detritus remineralises linearly to NH4 
 !   - nitrogen.F90 then handles NH4 -> NO3 through nitrification
 !-------------------------------------------------------------------------------------------------------
 module detritus
@@ -27,7 +27,6 @@ module detritus
 
       ! --- Couplings to dissolved nutrient module
       type(type_state_variable_id) :: id_nh4
-      type(type_state_variable_id) :: id_po4
       !--- Optional couplings
       type(type_state_variable_id) :: id_o2
       type(type_state_variable_id) :: id_dic
@@ -102,7 +101,6 @@ contains
 
       ! ---------------- Couplings ----------------
       call self%register_state_dependency(self%id_nh4, 'nh4', 'mmol m-3', 'Dissolved ammonium', required=.true.)
-      call self%register_state_dependency(self%id_po4, 'po4', 'mmol m-3', 'Dissolved phosphate', required=.true.)
 
       call self%register_state_dependency(self%id_o2,  'o2',  'mmol O2 m-3', 'Dissolved oxygen', required=.false.)
       call self%register_state_dependency(self%id_dic, 'dic', 'mmol C m-3',  'Dissolved inorganic carbon', required=.false.)
@@ -131,7 +129,7 @@ contains
 
       real(rk) :: det
       real(rk) :: pom_prod_n
-      real(rk) :: remin_n, remin_c, remin_p
+      real(rk) :: remin_n, remin_c
       real(rk) :: temp, fT
       real(rk) :: o2, faer
       real(rk) :: o2_cons_aer
@@ -161,8 +159,7 @@ contains
 
          ! Linear remineralisation in N units.
          remin_n = self%k_remin_det * fT * faer * max(det, 0.0_rk)
-         remin_c = self%c_to_n_det * remin_n
-         remin_p = remin_n / self%n_to_p_det  
+         remin_c = self%c_to_n_det * remin_n 
          
          ! O2 consumption associated with aerobic remineralisation.
          ! O2 consumption is computed from the amount of organic C remineralised,
@@ -171,7 +168,8 @@ contains
          
          ! Alkalinity generation during aerobic remineralisation.
          ! Equation R1 in Middelburg et al. (2020)
-         ! (CH2O)(NH3)n/c(H3PO4)p/c + O2 → CO2 + n/c NH3 + p/c H3PO4 + H2O 	Alk change: n/c-p/c per mol C or 1-p/n per mol N   
+         ! (CH2O)(NH3)n/c(H3PO4)p/c + O2 → CO2 + n/c NH3 + p/c H3PO4 + H2O 	Alk change: n/c-p/c per mol C or 1-p/n per mol N  
+         ! PO4 is represented via stoichiometry and not as a state variable 
          alk_prod_aer = remin_n * (1.0_rk - 1.0_rk/self%n_to_p_det)
 
          ! Detritus receives particulate production from pelagic_ecosystem and loses material by remineralisation.
@@ -179,7 +177,6 @@ contains
 
          ! Remineralised detrital N and P return to dissolved inorganic nutrients.
          _ADD_SOURCE_(self%id_nh4, remin_n)
-         _ADD_SOURCE_(self%id_po4, remin_p)
 
          ! Aerobic remineralisation stoichiometry
          if (_AVAILABLE_(self%id_o2)) _ADD_SOURCE_(self%id_o2, -o2_cons_aer)
