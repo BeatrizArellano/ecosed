@@ -1,8 +1,9 @@
 #include "fabm_driver.h"
 
 !-------------------------------------------------------------------------------------------------------
-! Pelagic ecosystem with phytoplankton, zooplankton, and optional chlorophyll photoacclimation.
-!
+! Pelagic ecosystem with phytoplankton and zooplankton.
+! Chlorophyll is diagnosed from phytoplankton carbon using a fixed Chl:C ratio.
+
 ! Phytoplankton growth is controlled by light, temperature, and inorganic nitrogen availability.
 ! Nitrogen uptake is represented using a smooth two-substrate limitation formulation with uptake from
 ! both NH4 and NO3, allowing preferential use of NH4 via the half-saturation terms.
@@ -23,11 +24,10 @@ module pelagic_ecosystem
 
    type, extends(type_base_model), public :: type_pelagic_ecosystem
       ! --- State variable identifiers
-      type(type_state_variable_id) :: id_phy, id_chl, id_zoo
+      type(type_state_variable_id) :: id_phy, id_zoo
 
       ! --- Couplings 
       type(type_state_variable_id) :: id_no3, id_nh4
-      type(type_state_variable_id) :: id_po4
 
       ! --- Optional Couplings 
       type(type_state_variable_id) :: id_o2
@@ -48,7 +48,7 @@ module pelagic_ecosystem
       type(type_diagnostic_variable_id) :: id_o2_prod
       type(type_diagnostic_variable_id) :: id_o2_cons
       type(type_diagnostic_variable_id) :: id_pom_prod_n           ! Total biologically produced POM (N-based)
-      type(type_diagnostic_variable_id) :: id_chl_diag             ! Diagnosed chlorophyll when photoacclimation is disabled
+      type(type_diagnostic_variable_id) :: id_chl                  ! Diagnosed chlorophyll
       type(type_diagnostic_variable_id) :: id_new_prod, id_reg_prod
       type(type_diagnostic_variable_id) :: id_alk_pp
       type(type_diagnostic_variable_id) :: id_alk_resp
@@ -57,15 +57,11 @@ module pelagic_ecosystem
       ! --- Parameters
       real(rk) :: mu_max                 ! Maximum phytoplankton growth rate at reference temperature
       real(rk) :: k_nh4, k_no3           ! Half-saturation constants for NH4 and NO3 uptake
-      real(rk) :: k_po4                  ! Half-saturation constant for phosphate uptake
       real(rk) :: g_max, k_g
       real(rk) :: m_phy, m_zoo2
 
-      logical  :: photoacclimation
       real(rk) :: chl_per_c
-      real(rk) :: alpha_phy
-      real(rk) :: alpha_chl      
-      real(rk) :: theta_chl_max
+      real(rk) :: alpha_phy     
       ! Grazing
       real(rk) :: sloppy_feed     ! messy feeding / sloppy loss fraction
       real(rk) :: beta_n          ! N assimilation efficiency
@@ -74,7 +70,6 @@ module pelagic_ecosystem
 
       real(rk) :: c_to_n_phy      ! mol C per mol N in phytoplankton
       real(rk) :: c_to_n_zoo      ! mol C per mol N in zooplankton
-      real(rk) :: n_to_p          ! mol N per mol P in phytoplankton and zooplankton
       real(rk) :: o2_per_c        ! mol O2 per C produced/respired
 
       ! Calcite precipitation
@@ -104,13 +99,9 @@ contains
       call self%get_parameter(self%mu_max,'mu_max','d-1','max specific phyto growth rate', default=1.0_rk, scale_factor=d_per_s)
       call self%get_parameter(self%k_nh4, 'k_nh4', 'mmol m-3', 'Half-saturation constant for ammonium uptake', default=0.2_rk)
       call self%get_parameter(self%k_no3, 'k_no3', 'mmol m-3', 'Half-saturation constant for nitrate uptake', default=0.5_rk)
-      call self%get_parameter(self%k_po4, 'k_po4', 'mmol m-3', 'Half-saturation constant for phosphate uptake', default=0.03_rk)
 
-      call self%get_parameter(self%photoacclimation, 'photoacclimation', '-','Enable chlorophyll photoacclimation', default=.false.)
-      call self%get_parameter(self%alpha_chl,'alpha_chl','mmolC mgChl-1 (W m-2)-1 d-1', 'Chlorophyll-specific initial slope of P-I curve', default=0.7_rk, scale_factor=d_per_s)
-      call self%get_parameter(self%theta_chl_max,'theta_chl_max','mgChl mmolC-1', 'Maximum chlorophyll-to-carbon ratio', default=0.6_rk)
-      call self%get_parameter(self%alpha_phy, 'alpha_phy', 'm2 W-1 d-1', 'Initial slope of phytoplankton P-I curve when photoacclimation is disabled', default=0.03_rk, scale_factor=d_per_s)
-      call self%get_parameter(self%chl_per_c,'chl_per_c','mgChl mmolC-1', 'Fixed Chl:C ratio when photoacclimation is disabled', default=0.3_rk)
+      call self%get_parameter(self%alpha_phy, 'alpha_phy', 'm2 W-1 d-1', 'Initial slope of phytoplankton P-I curve', default=0.03_rk, scale_factor=d_per_s)
+      call self%get_parameter(self%chl_per_c,'chl_per_c','mgChl mmolC-1', 'Fixed Chl:C ratio', default=0.3_rk)
 
       call self%get_parameter(self%g_max, 'g_max', 'd-1','max specific grazing rate', default=0.5_rk, scale_factor=d_per_s)
       call self%get_parameter(self%k_g,   'k_g',   'mmol m-3','Holling-II half-sat prey for grazing', default=0.5_rk)
@@ -127,7 +118,6 @@ contains
 
       call self%get_parameter(self%c_to_n_phy, 'c_to_n_phy', '-', 'Phytoplankton molar C:N ratio', default=6.625_rk)
       call self%get_parameter(self%c_to_n_zoo, 'c_to_n_zoo', '-', 'Zooplankton molar C:N ratio', default=5.625_rk)
-      call self%get_parameter(self%n_to_p, 'n_to_p', '-', 'Phytoplankton and zooplankton molar N:P ratio', default=16.0_rk)
       call self%get_parameter(self%o2_per_c,  'o2_per_c',  'mol O2 mol C-1', 'Effective O2 produced/consumed per C fixed/respired', default=1.3_rk)
 
       call self%get_parameter(self%rain_ratio, 'rain_ratio', '-', 'Calcite:POC rain ratio', default=0.0_rk, minimum=0.0_rk)
@@ -143,10 +133,6 @@ contains
       ! ---------------- State variables ----------------      
       call self%register_state_variable(self%id_phy,   'phy',   'mmol N m-3', 'Phytoplankton',   1.0e-12_rk, minimum=0.0_rk, vertical_movement=w_phy)
       call self%set_variable_property(self%id_phy, 'is_solute', .false.)
-      if (self%photoacclimation) then
-         call self%register_state_variable(self%id_chl,   'chl',   'mg m-3', 'Chlorophyll',       1.0e-12_rk, minimum=0.0_rk, vertical_movement=w_phy)
-         call self%set_variable_property(self%id_chl, 'is_solute', .false.)
-      end if
       call self%register_state_variable(self%id_zoo,   'zoo',   'mmol N m-3', 'Zooplankton',     1.0e-12_rk, minimum=0.0_rk)
       call self%set_variable_property(self%id_zoo, 'is_solute', .false.)
 
@@ -157,7 +143,6 @@ contains
       ! ---------------- Couplings ----------------
       call self%register_state_dependency(self%id_no3, 'no3', 'mmol m-3', 'Dissolved nitrate', required=.true.)
       call self%register_state_dependency(self%id_nh4, 'nh4', 'mmol m-3', 'Dissolved ammonium', required=.true.)
-      call self%register_state_dependency(self%id_po4, 'po4', 'mmol m-3', 'Dissolved phosphate', required=.true.)
       call self%register_state_dependency(self%id_o2,  'o2',  'mmol m-3', 'Dissolved oxygen', required=.false.)
       call self%register_state_dependency(self%id_dic, 'dic', 'mmol C m-3', 'Total dissolved inorganic carbon', required=.false.)
       call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.)   
@@ -165,9 +150,8 @@ contains
 
       ! ---------------- Diagnostics ----------------
       call self%register_diagnostic_variable(self%id_pom_prod_n, 'pom_prod_n', 'mmol N m-3 s-1', 'Production rate of particulate organic matter from pelagic biology')
-      if (.not. self%photoacclimation) then
-         call self%register_diagnostic_variable(self%id_chl_diag, 'chl', 'mg m-3','Chlorophyll diagnosed from phytoplankton biomass')
-      end if
+      call self%register_diagnostic_variable(self%id_chl, 'chl', 'mg m-3','Chlorophyll diagnosed from phytoplankton biomass')
+
       if (self%save_process_rates) then
          call self%register_diagnostic_variable(self%id_TPP,   'TPP',   'mmol N m-3 d-1', 'Total Primary Production (N-based)')
          call self%register_diagnostic_variable(self%id_GRAZE, 'GRAZE', 'mmol N m-3 d-1', 'Grazing rate (N-based)')
@@ -191,7 +175,7 @@ contains
       call self%register_dependency(self%id_porosity, type_interior_standard_variable(name='porosity', units='1'), required=.false.)
       call self%register_dependency(self%id_omega_ca, 'omega_ca', '1', 'Calcite saturation state', required=.false.)
 
-      ! light attenuation feedback (PHY + POM)
+      ! Phytoplankton contribution to light attenuation
       call self%add_to_aggregate_variable(standard_variables%attenuation_coefficient_of_photosynthetic_radiative_flux, self%id_phy,   scale_factor=self%kc)
    end subroutine initialize
 
@@ -199,17 +183,16 @@ contains
       class(type_pelagic_ecosystem), intent(in) :: self
       _DECLARE_ARGUMENTS_DO_
 
-      real(rk) :: phy, chl, zoo
+      real(rk) :: phy, zoo
       real(rk) :: chl_diag
-      real(rk) :: no3, nh4, po4
+      real(rk) :: no3, nh4
       real(rk) :: par, temp, phi
 
-      real(rk) :: fN, fnut, fT, mu_T, alphaI
-      real(rk) :: dno3, dnh4, dpo4
-      real(rk) :: lim_nh4, lim_no3, denom_n, lim_po4
+      real(rk) :: fN, fT, mu_T, alphaI
+      real(rk) :: dno3, dnh4
+      real(rk) :: lim_nh4, lim_no3, denom_n
       real(rk) :: tpp, new_prod, reg_prod
-      real(rk) :: theta, cphy, fch, jden
-      real(rk) :: chl_prod, chl_loss
+      real(rk) :: cphy, jden
       real(rk) :: phy_source
       real(rk) :: graze
       real(rk) :: mort_p, mort_z
@@ -221,32 +204,27 @@ contains
       real(rk) :: egestion_n
       real(rk) :: grow_n_pot, grow_c_pot
       real(rk) :: zoo_growth
-      real(rk) :: zoo_excr_n, zoo_excr_p
+      real(rk) :: zoo_excr_n
       real(rk) :: zoo_resp_c
       real(rk) :: pom_prod_n, pom_prod_c
       real(rk) :: o2_prod, o2_cons_resp
-      real(rk) :: phy_kill, zoo_kill, chl_kill
+      real(rk) :: phy_kill, zoo_kill
       real(rk) :: omega_ca
-      real(rk) :: calcite_rain_ratio, calcite_prod
+      real(rk) :: calcite_prod
       logical  :: do_calcification
       logical  :: is_sediment
 
       real(rk), parameter :: secs_pr_day = 86400.0_rk
       real(rk), parameter :: k_sed_kill_phy = 200.0_rk * (1.0_rk/secs_pr_day)        ! Rapid removal of phytoplankton in sediments
       real(rk), parameter :: k_sed_kill_zoo = 200.0_rk * (1.0_rk/secs_pr_day)        ! Rapid removal of zooplankton in sediments
+      real(rk), parameter :: n_to_p         = 16.0_rk
       real(rk), parameter :: eps = 1.0e-12_rk
 
       _LOOP_BEGIN_
 
          _GET_(self%id_no3, no3)
          _GET_(self%id_nh4, nh4)
-         _GET_(self%id_po4, po4)
          _GET_(self%id_phy, phy)
-         if (self%photoacclimation) then
-            _GET_(self%id_chl, chl)
-         else
-            chl = 0.0_rk
-         end if
          _GET_(self%id_zoo, zoo)
          ! Environment
          _GET_(self%id_par, par)
@@ -261,7 +239,6 @@ contains
          ! phi=1 in water layers and phi<1 in sediment layers.
          is_sediment = (phi < 1.0_rk - eps)
 
-         calcite_rain_ratio = 0.0_rk
          calcite_prod       = 0.0_rk
          omega_ca           = 0.0_rk
          pom_prod_c         = 0.0_rk
@@ -269,7 +246,7 @@ contains
          ! In the water column   
          if (.not. is_sediment) then            
             !-------------------------------------------------------------------
-            !                 Phytoplankton and Chlorophyll
+            !                 Phytoplankton and diagnosed Chlorophyll
             !-------------------------------------------------------------------
 
             ! --- Nitrogen limitation ---
@@ -288,11 +265,6 @@ contains
 
             fN = lim_no3 + lim_nh4
 
-            ! PO4 Monod limitation
-            lim_po4 = po4 / (self%k_po4 + po4)
-            ! Combined nutrient limitation
-            fnut = min(fN, lim_po4)
-
             ! --- Temperature dependence ---
             ! Eppley's (1972) exponential scaling of metabolic rates with temperature.
             ! Sets the temperature-dependent maximum growth rate.
@@ -303,51 +275,23 @@ contains
             cphy = self%c_to_n_phy * max(phy,0.0_rk)  ! Carbon in phytoplankton
 
             ! --- Light limitation ---
-            chl_loss = 0.0_rk
-            chl_prod = 0.0_rk
-            chl_diag = 0.0_rk
-            ! In photoacclimation mode, chlorophyll is prognostic and defines Chl:C.
-            ! Otherwise chlorophyll is diagnosed from a fixed Chl:C ratio.
-            if (self%photoacclimation) then
-               ! Compute current Chl:C ratio from chlorophyll
-               if (cphy > eps) then
-                  theta = chl / cphy                     ! Chl:C ratio
-               else
-                  theta = self%theta_chl_max             ! Maximum Chl:C ratio
-               end if
-               theta = min(self%theta_chl_max, max(theta, eps))  
-               ! Chlorophyll-dependent light harvesting; proportional to Chl:C ratio.
-               ! alphaI represents the light-limited potential growth rate.
-               alphaI = self%alpha_chl * theta * max(par,0.0_rk)
-            else
-               ! Simple non-chlorophyll light limitation
-               alphaI = self%alpha_phy * max(par,0.0_rk)
-               ! No independent chlorophyll production in this mode
-               chl_diag = self%chl_per_c * cphy
-               chl_prod = 0.0_rk
-            end if
+            ! Light-limited potential phytoplankton growth rate.
+            alphaI = self%alpha_phy * max(par,0.0_rk)
+            ! Compute chlorophyll from phytoplankton carbon biomass
+            chl_diag = self%chl_per_c * cphy
 
             ! --- Primary production ---
             ! Primary production (N-based) follows a smooth saturating light-response formulation,
             ! transitioning between light-limited (alphaI) and temperature-limited (mu_T) growth.
             ! The resulting N-based production is further reduced by total nitrogen limitation fN.
             jden = sqrt(mu_T*mu_T + alphaI*alphaI + eps)
-            tpp = (mu_T * alphaI / jden) * fnut * phy
+            tpp = (mu_T * alphaI / jden) * fN * phy
 
             ! New and regenerated production
             ! Partition total phytoplankton production into NO3-supported (new) and NH4-supported
             ! (regenerated) production using the relative NO3 and NH4 limitation terms.
             new_prod = tpp * lim_no3 / (fN + eps)
             reg_prod = tpp * lim_nh4 / (fN + eps)
-
-            ! --- Chlorophyll photoacclimation ---
-            ! Chlorophyll synthesis tied to carbon fixation, enhanced under low light.
-            ! Regulates Chl:C ratio toward a light-dependent optimum, limited by theta_chl_max.
-            if (self%photoacclimation) then
-               fch = mu_T / jden                                           ! Light-control term for chlorophyll synthesis
-               ! Chl production enhanced under low-light while constrained by nutrient availability
-               chl_prod = (self%theta_chl_max * fch * fnut / theta) * (tpp * self%c_to_n_phy) 
-            end if
 
             !-------------------------------------------------------------------
             !             Zooplankton grazing
@@ -397,19 +341,11 @@ contains
             ! --- Chlorophyll loss ---
             ! Chlorophyll decreases in proportion to phytoplankton biomass loss
             phy_source = tpp - graze - mort_p 
-            if (self%photoacclimation) then
-               if (phy > eps) then
-                  chl_loss = (chl/phy) * (graze + mort_p)
-               else
-                  chl_loss = 0.0_rk
-               end if
-            end if
 
             ! --- Excretion from assimilated biomass ---
             ! Material assimilated but not used for growth is returned to dissolved pools
             ! Excess assimilated N is excreted as NH4; excess assimilated C is respired as DIC
             zoo_excr_n = max(0.0_rk, self%beta_n * assim_n - zoo_growth)
-            zoo_excr_p = zoo_excr_n/self%n_to_p
             zoo_resp_c = max(0.0_rk, self%beta_c * assim_c - self%c_to_n_zoo * zoo_growth)
 
             ! Total particulate matter is produced from feeding losses, egestion, and mortality
@@ -436,13 +372,12 @@ contains
                _GET_(self%id_omega_ca, omega_ca)
 
                if (omega_ca > 1.0_rk) then
-                  calcite_rain_ratio = self%rain_ratio
-                  calcite_prod       = calcite_rain_ratio * pom_prod_c
+                  calcite_prod       = self%rain_ratio * pom_prod_c
                end if
             end if
 
             !--------------------------------------------------------------------------
-            !               Tendencies (all in s-1) 
+            !               Tendencies (concentration units per second) 
             !--------------------------------------------------------------------------
             ! Changes in inorganic nitrogen pools:
             ! - regenerated production consumes NH4
@@ -450,11 +385,6 @@ contains
             ! - zooplankton excretion returns N to NH4
             dnh4 = -reg_prod + zoo_excr_n
             dno3 = -new_prod
-
-            ! Changes in dissolved phosphate:
-            ! - all primary production consumes PO4 according to fixed N:P
-            ! - zooplankton excretion regenerates PO4
-            dpo4 = -tpp / self%n_to_p + zoo_excr_p
 
             ! Changes in DIC
             ! DIC decreases through phytoplankton carbon fixation and increases through zooplankton respiration.
@@ -466,9 +396,9 @@ contains
             ! PP (NO3): CO2 + n/c HNO3 + p/c H3PO4 + (1+n)H2O → (CH2O)(NH3)n(H3PO4)p + (1+2n)O2  Alk change:	p/c + n/c per mol C or p/n+1 per mol N
             ! PP (NH4): CO2 + n/c NH3 + p/c H3PO4 + H2O → (CH2O)(NH3)n(H3PO4)p + O2 Alk change: p/c-n/c per mol C or p/n-1 per mol N 
             ! Respiration: (CH2O)(NH3)n/c(H3PO4)p/c + O2 → CO2 + n/c NH3 + p/c H3PO4 + H2O 	Alk change: n/c - p/c per mol C or 1-p/n per mol N
-            alk_pp_change   = (1.0_rk + 1.0_rk/self%n_to_p) * new_prod  &
-                            + (-1.0_rk + 1.0_rk/self%n_to_p) * reg_prod
-            alk_resp_change = zoo_excr_n - zoo_excr_p
+            alk_pp_change   = (1.0_rk + 1.0_rk/n_to_p) * new_prod  &
+                            + (-1.0_rk + 1.0_rk/n_to_p) * reg_prod
+            alk_resp_change = zoo_excr_n - zoo_excr_n/n_to_p
             alk_calc_change = -2.0_rk * calcite_prod
             alk_change      = alk_pp_change + alk_resp_change + alk_calc_change
 
@@ -482,18 +412,11 @@ contains
             ! ==============================================================
             ! In sediment layers: kill pelagic biomass rapidly and transfer
             ! phy + zoo nitrogen to particulate organic matter.
-            ! Chlorophyll is removed too, but does not contribute to POM.
+            ! Diagnosed chlorophyll is set to zero.
             ! ==============================================================
 
             phy_kill = k_sed_kill_phy * phy
             zoo_kill = k_sed_kill_zoo * zoo
-
-            if (self%photoacclimation) then
-               chl_kill = k_sed_kill_phy * chl
-            else
-               chl_kill = 0.0_rk
-               chl_diag = 0.0_rk
-            end if
 
             ! No active pelagic biology in sediments
             tpp             = 0.0_rk
@@ -503,11 +426,9 @@ contains
             mort_p          = 0.0_rk
             zoo_growth      = 0.0_rk
             zoo_excr_n      = 0.0_rk
-            zoo_excr_p      = 0.0_rk
             zoo_resp_c      = 0.0_rk
             dno3            = 0.0_rk
             dnh4            = 0.0_rk
-            dpo4            = 0.0_rk
             dic_change      = 0.0_rk
             alk_change      = 0.0_rk
             alk_pp_change   = 0.0_rk
@@ -516,13 +437,12 @@ contains
             o2_prod         = 0.0_rk
             o2_cons_resp    = 0.0_rk
             o2_change       = 0.0_rk
-            chl_prod        = 0.0_rk
+            chl_diag        = 0.0_rk
 
             ! Dead pelagic biomass becomes POM (N-based)
             pom_prod_n = phy_kill + zoo_kill
             phy_source = -phy_kill
             mort_z     = zoo_kill
-            chl_loss   = chl_kill
          end if
 
          !-------------------------------------------------------------------------
@@ -531,13 +451,9 @@ contains
          ! NO3 and NH4 
          _ADD_SOURCE_(self%id_no3, dno3)
          _ADD_SOURCE_(self%id_nh4, dnh4)
-         _ADD_SOURCE_(self%id_po4, dpo4)
 
          ! PHY
          _ADD_SOURCE_(self%id_phy, phy_source)
-         if (self%photoacclimation) then
-            _ADD_SOURCE_(self%id_chl, chl_prod - chl_loss)
-         end if
 
          ! ZOO
          _ADD_SOURCE_(self%id_zoo, zoo_growth - mort_z)
@@ -551,9 +467,8 @@ contains
 
          ! ---------------- Diagnostics ----------------
          _SET_DIAGNOSTIC_(self%id_pom_prod_n, pom_prod_n)
-         if (.not. self%photoacclimation) then
-            _SET_DIAGNOSTIC_(self%id_chl_diag, chl_diag)
-         end if
+         _SET_DIAGNOSTIC_(self%id_chl, chl_diag)
+
          ! (convert to rates per day)
          if (self%save_process_rates) then
             _SET_DIAGNOSTIC_(self%id_TPP,       tpp      * secs_pr_day)
