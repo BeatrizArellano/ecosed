@@ -14,8 +14,7 @@ module om_degradation
 
       ! --- Couplings
       type(type_state_variable_id) :: id_o2
-      type(type_state_variable_id) :: id_no3, id_nh4
-      type(type_state_variable_id) :: id_po4      
+      type(type_state_variable_id) :: id_no3, id_nh4    
       type(type_state_variable_id) :: id_mn2, id_mno2
       type(type_state_variable_id) :: id_fe2, id_fe3ox
       type(type_state_variable_id) :: id_so4, id_sulfide
@@ -55,6 +54,8 @@ module om_degradation
       real(rk) :: c_to_n_pom_l
       real(rk) :: c_to_n_pom_s
       real(rk) :: c_to_n_pom_r
+      ! N:P ratios are retained to account for the phosphorus contribution
+      ! to remineralisation-induced alkalinity changes. PO4 is not explicitly simulated.
       real(rk) :: n_to_p_pom_l
       real(rk) :: n_to_p_pom_s
       real(rk) :: n_to_p_pom_r
@@ -148,7 +149,6 @@ contains
       ! ---------------- Couplings ----------------
       call self%register_state_dependency(self%id_no3, 'no3', 'mmol m-3', 'Dissolved nitrate', required=.true.)
       call self%register_state_dependency(self%id_nh4, 'nh4', 'mmol m-3', 'Dissolved ammonium', required=.true.)
-      call self%register_state_dependency(self%id_po4, 'po4', 'mmol P m-3', 'Dissolved phosphate', required=.true.)
       call self%register_state_dependency(self%id_o2,  'o2',  'mmol m-3', 'Dissolved oxygen', required=.true.)
       call self%register_state_dependency(self%id_mn2,  'mn2',  'mmol m-3', 'Dissolved Mn(II)', required=.false.)
       call self%register_state_dependency(self%id_mno2, 'mno2', 'mmol m-3', 'Particulate Mn(IV) oxide', required=.false.)
@@ -198,7 +198,7 @@ contains
       real(rk) :: pom_l, pom_s, pom_r
       real(rk) :: temp, pom_prod_n
       real(rk) :: phi, phi_s                     ! Porosity
-      real(rk) :: p2d, d2p
+      real(rk) :: p2d
       real(rk) :: o2, no3, fT
       real(rk) :: mn2, mno2
       real(rk) :: fe2, fe3ox
@@ -229,7 +229,6 @@ contains
       real(rk) :: no3_cons_denit
       real(rk) :: n_loss_denit
       real(rk) :: nh4_prod
-      real(rk) :: po4_prod_rem
       real(rk) :: c_remin_mn, mno2_cons_mn, mn2_prod_mn
       real(rk) :: c_remin_fe, fe3ox_cons_fe, fe2_prod_fe
       real(rk) :: c_remin_so4, so4_cons, sulfide_prod
@@ -305,12 +304,10 @@ contains
          !   d2p = phi/(1-phi)   for dissolved -> particulate
          if (phi > eps_phi .and. phi < 1.0_rk - eps_phi) then
             is_water = .false.       ! It is a sediment layer
-            p2d = phi_s / phi
-            d2p = phi / phi_s            
+            p2d = phi_s / phi  
          else
             is_water = .true.        ! It is a water-column layer
             p2d = 1.0_rk             ! No phase conversion in water
-            d2p = 1.0_rk
          end if
          !------------------------------------------------------------------------
 
@@ -676,11 +673,6 @@ contains
          ! Convert NH4 production from solid-phase to porewater-volume units.
          nh4_prod = p2d * rem_total
 
-         ! PO4 production
-         po4_prod_rem = p2d * (rem_pom_l_tot / self%n_to_p_pom_l  &
-                            + rem_pom_s_tot / self%n_to_p_pom_s  &
-                            + rem_pom_r_tot / self%n_to_p_pom_r)
-
          ! DIC production is computed from total remineralised organic matter using the C:N ratio of each POM pool.
          ! 1 mol of DIC is produced per mol of C remineralised in OM for most pathways. 
          dic_prod_rem = self%c_to_n_pom_l * rem_pom_l_tot &
@@ -712,7 +704,6 @@ contains
          _ADD_SOURCE_(self%id_nh4,  nh4_prod)
          _ADD_SOURCE_(self%id_no3, -no3_cons_denit)
          _ADD_SOURCE_(self%id_o2,  -o2_cons_rem)
-         _ADD_SOURCE_(self%id_po4, po4_prod_rem) 
          if (use_mn) then
             _ADD_SOURCE_(self%id_mno2, -mno2_cons_mn)
             _ADD_SOURCE_(self%id_mn2,   mn2_prod_mn)
