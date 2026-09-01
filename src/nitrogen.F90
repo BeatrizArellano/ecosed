@@ -25,7 +25,7 @@
 module nitrogen
 
    use fabm_types
-   use molecular_diff, only: DIFF_ION_LINEAR, m0_NO3, m1_NO3, m0_NH4, m1_NH4, m0_PO4, m1_PO4
+   use molecular_diff, only: DIFF_ION_LINEAR, m0_NO3, m1_NO3, m0_NH4, m1_NH4
    implicit none
    private
 
@@ -33,7 +33,6 @@ module nitrogen
       ! --- State variables
       type(type_state_variable_id) :: id_no3
       type(type_state_variable_id) :: id_nh4
-      type(type_state_variable_id) :: id_po4
 
       !--- Optional Coupling
       type(type_state_variable_id) :: id_o2      
@@ -90,14 +89,6 @@ contains
       call self%set_variable_property(self%id_nh4, 'diff_method', DIFF_ION_LINEAR)
       call self%set_variable_property(self%id_nh4, 'm0', m0_NH4)
       call self%set_variable_property(self%id_nh4, 'm1', m1_NH4)
-
-      ! --- PO4 ---
-      ! Phosphate is defined here as it varies with N depending on stoichiometry
-      call self%register_state_variable(self%id_po4, 'po4', 'mmol m-3', 'Dissolved Phosphate', initial_value=0.36_rk, minimum=0.0_rk, no_river_dilution=.true.)
-      call self%set_variable_property(self%id_po4, 'is_solute', .true.)
-      call self%set_variable_property(self%id_po4, 'diff_method', DIFF_ION_LINEAR)
-      call self%set_variable_property(self%id_po4, 'm0', m0_PO4)
-      call self%set_variable_property(self%id_po4, 'm1', m1_PO4)
       
       ! --- Contribution to total Nitrogen
       call self%add_to_aggregate_variable(standard_variables%total_nitrogen, self%id_no3)
