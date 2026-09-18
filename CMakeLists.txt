@@ -11,6 +11,7 @@ add_library(fabm_models_ecosed OBJECT
             src/nitrogen.F90
             src/om_degradation.F90
             src/oxygen.F90
+            src/pelagic_common.F90
             src/pelagic_ecosystem.F90 
             src/pyrite.F90
             src/sulfur.F90           
