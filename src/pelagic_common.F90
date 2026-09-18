@@ -15,8 +15,14 @@ module pelagic_common
    implicit none
    private
 
+   public :: redfield_c_to_n
    public :: pom_production_n
    public :: total_chlorophyll
+
+   !----------------------------------------------------------------------------------------------------
+   ! Fixed Redfield molar carbon-to-nitrogen ratio used for pelagic biomass.
+   !----------------------------------------------------------------------------------------------------
+   real(rk), parameter :: redfield_c_to_n = 106.0_rk / 16.0_rk
 
    !----------------------------------------------------------------------------------------------------
    ! Total production of particulate organic matter by pelagic biological processes.
