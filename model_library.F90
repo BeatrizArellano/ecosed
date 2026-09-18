@@ -12,6 +12,7 @@ module ecosed_model_library
    use om_degradation
    use oxygen
    use pelagic_ecosystem
+   use phytoplankton
    use pyrite
    use sulfur
 
@@ -45,6 +46,7 @@ contains
          case ('om_degradation');      allocate (type_om_degradation::model)
          case ('oxygen');              allocate (type_oxygen::model)
          case ('pelagiceco');          allocate (type_pelagic_ecosystem::model)
+         case ('phytoplankton');       allocate (type_phytoplankton::model)
          case ('pyrite');              allocate (type_pyrite::model)
          case ('sulfur');              allocate (type_sulfur::model)
          
