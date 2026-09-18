@@ -3,15 +3,17 @@
 !-------------------------------------------------------------------------------------------------------
 ! Zooplankton functional group.
 !
-! Zooplankton grazes on a coupled phytoplankton biomass state using a Holling-II formulation.
+! Zooplankton grazes on one or more coupled prey biomass states using a shared Holling-II formulation.
+! Prey-specific availability/preference coefficients determine how strongly each prey contributes to
+! total perceived food and how total grazing is distributed among prey.
+!
 ! Grazed material is partitioned into sloppy feeding losses, egestion, zooplankton growth,
 ! nitrogen excretion, and carbon respiration.
 !
 ! Particulate losses contribute to the shared pelagic POM-production aggregate.
 ! A fixed Redfield C:N ratio is used to convert ingested prey nitrogen to carbon.
 !
-! This initial implementation supports one phytoplankton prey and preserves the grazing and
-! zooplankton-growth equations of the original monolithic pelagic ecosystem.
+! With one prey and pref1 = 1, the formulation reduces to the original one-prey Holling-II equation.
 !-------------------------------------------------------------------------------------------------------
 module zooplankton
 
@@ -26,8 +28,8 @@ module zooplankton
       ! --- State variable
       type(type_state_variable_id) :: id_biomass
 
-      ! --- Coupled prey state
-      type(type_state_variable_id) :: id_prey
+      ! --- Coupled prey states
+      type(type_state_variable_id), allocatable :: id_prey(:)
 
       ! --- Couplings
       type(type_state_variable_id) :: id_nh4
@@ -45,10 +47,14 @@ module zooplankton
 
       ! --- Optional diagnostics
       type(type_diagnostic_variable_id) :: id_GRAZE
+      type(type_diagnostic_variable_id), allocatable :: id_GRAZE_PREY(:)
       type(type_diagnostic_variable_id) :: id_o2_cons
       type(type_diagnostic_variable_id) :: id_alk_resp
 
       ! --- Parameters
+      integer :: nprey
+      real(rk), allocatable :: pref(:)
+
       real(rk) :: g_max
       real(rk) :: k_g
       real(rk) :: m_zoo2
@@ -78,9 +84,26 @@ contains
 
       real(rk), parameter :: d_per_s = 1.0_rk / 86400.0_rk
 
+      integer :: iprey
+      character(len=16) :: index
+
       !-------------------------------------------------------------------------------------------------
       ! Parameters
       !-------------------------------------------------------------------------------------------------
+
+      call self%get_parameter(self%nprey, 'nprey', '', 'Number of prey types', &
+                              default=1, minimum=1)
+
+      allocate(self%id_prey(self%nprey))
+      allocate(self%pref(self%nprey))
+
+      do iprey = 1, self%nprey
+         write(index, '(i0)') iprey
+
+         call self%get_parameter(self%pref(iprey), 'pref' // trim(index), '-', &
+                                 'Relative grazing preference for prey ' // trim(index), &
+                                 default=1.0_rk, minimum=0.0_rk)
+      end do
 
       call self%get_parameter(self%g_max, 'g_max', 'd-1', 'Maximum specific grazing rate', &
                               default=0.5_rk, scale_factor=d_per_s)
@@ -129,9 +152,13 @@ contains
       ! Couplings
       !-------------------------------------------------------------------------------------------------
 
-      ! Grazing target. The zooplankton module both reads this state and applies the grazing loss to it.
-      call self%register_state_dependency(self%id_prey, 'prey_biomass', 'mmol N m-3', &
-                                          'Phytoplankton prey biomass', required=.true.)
+      ! Grazing targets. The zooplankton module both reads these states and applies grazing losses to them.
+      do iprey = 1, self%nprey
+         write(index, '(i0)') iprey
+
+         call self%register_state_dependency(self%id_prey(iprey), 'prey' // trim(index), 'mmol N m-3', &
+                                             'Prey ' // trim(index) // ' biomass', required=.true.)
+      end do
 
       ! Nitrogen excretion is returned to ammonium.
       call self%register_state_dependency(self%id_nh4, 'nh4', 'mmol m-3', &
@@ -172,7 +199,17 @@ contains
       if (self%save_process_rates) then
 
          call self%register_diagnostic_variable(self%id_GRAZE, 'GRAZE', 'mmol N m-3 d-1', &
-                                                'Grazing rate (N-based)')
+                                                'Total grazing rate (N-based)')
+
+         allocate(self%id_GRAZE_PREY(self%nprey))
+
+         do iprey = 1, self%nprey
+            write(index, '(i0)') iprey
+
+            call self%register_diagnostic_variable(self%id_GRAZE_PREY(iprey), &
+                                                   'GRAZE' // trim(index), 'mmol N m-3 d-1', &
+                                                   'Grazing rate on prey ' // trim(index))
+         end do
 
          call self%register_diagnostic_variable(self%id_o2_cons, 'O2_CONS', 'mmol m-3 d-1', &
                                                 'O2 consumption from zooplankton respiration')
@@ -194,10 +231,15 @@ contains
       class(type_zooplankton), intent(in) :: self
       _DECLARE_ARGUMENTS_DO_
 
+      integer :: iprey
+
       real(rk) :: biomass
-      real(rk) :: prey
+      real(rk), dimension(self%nprey) :: prey
+      real(rk), dimension(self%nprey) :: graze_prey
       real(rk) :: phi
 
+      real(rk) :: food
+      real(rk) :: grazing_specific
       real(rk) :: graze
       real(rk) :: ing_n, ing_c
       real(rk) :: sloppy_n
@@ -213,7 +255,6 @@ contains
       real(rk) :: mortality
 
       real(rk) :: biomass_source
-      real(rk) :: prey_source
       real(rk) :: biomass_kill
 
       real(rk) :: nh4_change
@@ -238,7 +279,10 @@ contains
          !----------------------------------------------------------------------------------------------
 
          _GET_(self%id_biomass, biomass)
-         _GET_(self%id_prey, prey)
+
+         do iprey = 1, self%nprey
+            _GET_(self%id_prey(iprey), prey(iprey))
+         end do
 
          if (_AVAILABLE_(self%id_porosity)) then
             _GET_(self%id_porosity, phi)
@@ -254,9 +298,25 @@ contains
 
          if (.not. is_sediment) then
 
-            ! Zooplankton consumes phytoplankton with the same Holling-II response
-            ! used in the original monolithic pelagic ecosystem.
-            graze = self%g_max * biomass * prey / (self%k_g + max(prey, 0.0_rk))
+            ! Preference-weighted total prey biomass perceived by zooplankton.
+            food = 0.0_rk
+            do iprey = 1, self%nprey
+               food = food + self%pref(iprey) * max(prey(iprey), 0.0_rk)
+            end do
+
+            ! Shared Holling-II response. The total grazing capacity is limited by g_max * biomass,
+            ! independent of the number of prey types.
+            graze_prey = 0.0_rk
+
+            if (food > eps) then
+               grazing_specific = self%g_max * biomass / (self%k_g + food)
+
+               do iprey = 1, self%nprey
+                  graze_prey(iprey) = grazing_specific * self%pref(iprey) * max(prey(iprey), 0.0_rk)
+               end do
+            end if
+
+            graze = sum(graze_prey)
 
             ! Grazed prey expressed in nitrogen and carbon units.
             ing_n = graze
@@ -288,7 +348,6 @@ contains
             mortality = self%m_zoo2 * biomass * biomass
 
             biomass_source = zoo_growth - mortality
-            prey_source = -graze
 
             pom_prod_n = sloppy_n + egestion_n + mortality
 
@@ -307,19 +366,19 @@ contains
             ! Sediment layers
             !
             ! Pelagic zooplankton entering sediment cells are rapidly removed and transferred
-            ! to particulate organic matter.
+            ! to particulate organic matter. Grazing is disabled in sediment cells.
             !-------------------------------------------------------------------------------------------
 
             biomass_kill = k_sed_kill_zoo * biomass
 
-            graze         = 0.0_rk
-            zoo_growth    = 0.0_rk
-            zoo_excr_n    = 0.0_rk
-            zoo_resp_c    = 0.0_rk
-            mortality     = 0.0_rk
+            graze          = 0.0_rk
+            graze_prey     = 0.0_rk
+            zoo_growth     = 0.0_rk
+            zoo_excr_n     = 0.0_rk
+            zoo_resp_c     = 0.0_rk
+            mortality      = 0.0_rk
 
             biomass_source = -biomass_kill
-            prey_source    = 0.0_rk
 
             nh4_change = 0.0_rk
             dic_change = 0.0_rk
@@ -336,7 +395,11 @@ contains
          !----------------------------------------------------------------------------------------------
 
          _ADD_SOURCE_(self%id_biomass, biomass_source)
-         _ADD_SOURCE_(self%id_prey, prey_source)
+
+         do iprey = 1, self%nprey
+            _ADD_SOURCE_(self%id_prey(iprey), -graze_prey(iprey))
+         end do
+
          _ADD_SOURCE_(self%id_nh4, nh4_change)
 
          if (_AVAILABLE_(self%id_dic)) then
@@ -362,7 +425,12 @@ contains
          !----------------------------------------------------------------------------------------------
 
          if (self%save_process_rates) then
-            _SET_DIAGNOSTIC_(self%id_GRAZE,   graze   * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_GRAZE, graze * secs_pr_day)
+
+            do iprey = 1, self%nprey
+               _SET_DIAGNOSTIC_(self%id_GRAZE_PREY(iprey), graze_prey(iprey) * secs_pr_day)
+            end do
+
             _SET_DIAGNOSTIC_(self%id_o2_cons, o2_cons * secs_pr_day)
          end if
 
