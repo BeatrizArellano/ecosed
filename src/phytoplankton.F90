@@ -18,7 +18,7 @@
 module phytoplankton
 
    use fabm_types
-   use pelagic_common, only: pom_production_n, total_chlorophyll
+   use pelagic_common, only: redfield_c_to_n, pom_production_n, total_chlorophyll
 
    implicit none
    private
@@ -61,8 +61,6 @@ module phytoplankton
 
       real(rk) :: chl_per_c
       real(rk) :: alpha_phy
-
-      real(rk) :: c_to_n_phy
       real(rk) :: o2_per_c
 
       ! --- Optical properties
@@ -109,8 +107,6 @@ contains
 
       call self%get_parameter(self%m_phy, 'm_phy', 'd-1', 'Linear phytoplankton mortality', &
                               default=0.05_rk, scale_factor=d_per_s)
-
-      call self%get_parameter(self%c_to_n_phy, 'c_to_n_phy', '-', 'Phytoplankton molar C:N ratio', default=6.625_rk)
 
       call self%get_parameter(self%o2_per_c, 'o2_per_c', 'mol O2 mol C-1', 'Effective O2 produced per C fixed', &
                               default=1.3_rk)
@@ -320,7 +316,7 @@ contains
             ! Biomass and chlorophyll
             !-------------------------------------------------------------------------------------------
             ! Convert N-based phytoplankton biomass to carbon.
-            cphy = self%c_to_n_phy * max(biomass, 0.0_rk)
+            cphy = redfield_c_to_n * max(biomass, 0.0_rk)
             ! Compute chlorophyll from phytoplankton carbon biomass
             chl_diag = self%chl_per_c * cphy
 
@@ -346,7 +342,7 @@ contains
 
             ! Changes in DIC
             ! DIC decreases through phytoplankton carbon fixation and increases through zooplankton respiration.
-            dic_change = -self%c_to_n_phy * tpp
+            dic_change = -redfield_c_to_n * tpp
 
             ! Changes in Alkalinity
             ! New production removes NO3- increasing alkalinity, while consumption of NH4 decreases it. 
@@ -357,7 +353,7 @@ contains
                        + (-1.0_rk + 1.0_rk / n_to_p) * reg_prod
 
             ! Oxygen production associated with carbon fixation.
-            o2_change = self%o2_per_c * self%c_to_n_phy * tpp
+            o2_change = self%o2_per_c * redfield_c_to_n * tpp
 
          else
 
