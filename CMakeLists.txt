@@ -14,6 +14,7 @@ add_library(fabm_models_ecosed OBJECT
             src/pelagic_common.F90
             src/pelagic_ecosystem.F90 
             src/phytoplankton.F90
+            src/zooplankton.F90
             src/pyrite.F90
             src/sulfur.F90           
            )
