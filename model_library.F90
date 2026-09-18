@@ -15,6 +15,7 @@ module ecosed_model_library
    use phytoplankton
    use pyrite
    use sulfur
+   use zooplankton
 
    implicit none
 
@@ -49,6 +50,7 @@ contains
          case ('phytoplankton');       allocate (type_phytoplankton::model)
          case ('pyrite');              allocate (type_pyrite::model)
          case ('sulfur');              allocate (type_sulfur::model)
+         case ('zooplankton');          allocate (type_zooplankton::model)
          
          ! Add case statements for new models here
       end select
