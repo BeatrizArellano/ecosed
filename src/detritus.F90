@@ -10,7 +10,7 @@
 !   det is stored in nitrogen units [mmol N m-3].
 !
 ! Coupling logic:
-!   - pelagic_ecosystem provides diagnostic pom_prod_n [mmol N m-3 s-1]
+!   - pelagic biological modules contribute to aggregate pom_production_n [mmol N m-3 s-1]
 !   - this module stores that production as detritus
 !   - detritus remineralises linearly to NH4 
 !   - nitrogen.F90 then handles NH4 -> NO3 through nitrification
@@ -18,6 +18,7 @@
 module detritus
 
    use fabm_types
+   use pelagic_common, only: pom_production_n
    implicit none
    private
 
@@ -32,7 +33,7 @@ module detritus
       type(type_state_variable_id) :: id_dic
       type(type_state_variable_id) :: id_alk
 
-      ! --- Dependency provided by pelagic_ecosystem
+      ! --- Dependency on aggregated pelagic POM production
       type(type_dependency_id) :: id_pom_prod_n
       type(type_dependency_id) :: id_temp
 
@@ -108,8 +109,8 @@ contains
 
       ! ---------------- Dependencies ----------------
       call self%register_dependency(self%id_temp, standard_variables%temperature)
-      ! This is provided by pelagic_ecosystem as a diagnostic in N units.
-      call self%register_dependency(self%id_pom_prod_n, 'pom_prod_n', 'mmol N m-3 s-1', 'Production of particulate organic matter from pelagic biology',required=.false.)
+      ! Total pelagic POM production aggregated across contributing biological modules.
+      call self%register_dependency(self%id_pom_prod_n, pom_production_n, required=.false.)
 
       ! ---------------- Diagnostics ----------------
       call self%register_diagnostic_variable(self%id_total_det, 'total_det', 'mmol N m-3', 'Total detritus')
@@ -172,7 +173,7 @@ contains
          ! PO4 is represented via stoichiometry and not as a state variable 
          alk_prod_aer = remin_n * (1.0_rk - 1.0_rk/self%n_to_p_det)
 
-         ! Detritus receives particulate production from pelagic_ecosystem and loses material by remineralisation.
+         ! Detritus receives aggregated pelagic particulate production and loses material by remineralisation.
          _ADD_SOURCE_(self%id_det, pom_prod_n - remin_n)
 
          ! Remineralised detrital N and P return to dissolved inorganic nutrients.

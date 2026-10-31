@@ -12,8 +12,10 @@ module ecosed_model_library
    use om_degradation
    use oxygen
    use pelagic_ecosystem
+   use phytoplankton
    use pyrite
    use sulfur
+   use zooplankton
 
    implicit none
 
@@ -45,8 +47,10 @@ contains
          case ('om_degradation');      allocate (type_om_degradation::model)
          case ('oxygen');              allocate (type_oxygen::model)
          case ('pelagiceco');          allocate (type_pelagic_ecosystem::model)
+         case ('phytoplankton');       allocate (type_phytoplankton::model)
          case ('pyrite');              allocate (type_pyrite::model)
          case ('sulfur');              allocate (type_sulfur::model)
+         case ('zooplankton');          allocate (type_zooplankton::model)
          
          ! Add case statements for new models here
       end select

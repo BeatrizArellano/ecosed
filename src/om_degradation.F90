@@ -5,6 +5,7 @@
 module om_degradation
 
    use fabm_types
+   use pelagic_common, only: pom_production_n
    implicit none
    private
 
@@ -164,7 +165,7 @@ contains
       ! ---------------- Dependencies ----------------
       call self%register_dependency(self%id_temp, standard_variables%temperature)
       call self%register_dependency(self%id_porosity, type_interior_standard_variable(name='porosity', units='1'), required=.false.)
-      call self%register_dependency(self%id_pom_prod_n, 'pom_prod_n', 'mmol m-3 s-1', 'Production of particulate organic Matter from pelagic biology')
+      call self%register_dependency(self%id_pom_prod_n, pom_production_n)
 
       ! ---------------- Diagnostics ----------------      
       call self%register_diagnostic_variable(self%id_total_pom, 'total_pom', 'mmol N m-3', 'Total particulate organic matter')
