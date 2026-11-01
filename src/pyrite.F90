@@ -67,6 +67,7 @@ module pyrite
       ! --- Parameters
       real(rk) :: k_pyrite_form       ! Lumped pyrite formation, m3 mmol-1 s-1 effectively
       real(rk) :: k_pyrite_ox_o2      ! Pyrite oxidation by O2, m3 mmol-1 s-1 effectively
+      logical  :: use_fe
       logical  :: save_process_rates
       logical  :: save_alkalinity_changes
 
@@ -87,6 +88,8 @@ contains
       real(rk) :: w_pyrite
 
       ! ---------------- Parameters ----------------
+      call self%get_parameter(self%use_fe, 'use_fe', '', &
+           'Use Fe2-dependent pyrite formation; WARNING: set false if om_degradation/form_pyrite=true', default=.true.)
       call self%get_parameter(self%k_pyrite_form, 'k_pyrite_form', 'm3 mmol-1 d-1', 'Mass-action rate constant for lumped pyrite formation from Fe2 and sulfide', &
                               default=1.0e-3_rk, scale_factor=d_per_s, minimum=0.0_rk)
 
@@ -106,8 +109,8 @@ contains
       call self%register_dependency(self%id_porosity, type_interior_standard_variable(name='porosity', units='1'), required=.false.)
 
       ! ---------------- Couplings ----------------
-      call self%register_state_dependency(self%id_fe2,     'fe2',     'mmol m-3',    'Dissolved Fe(II)', required=.true.)
-      call self%register_state_dependency(self%id_fe3ox,   'fe3ox',   'mmol m-3',    'Particulate reactive Fe(III) oxide/hydroxide', required=.true.)
+      call self%register_state_dependency(self%id_fe2,     'fe2',     'mmol m-3',    'Dissolved Fe(II)', required=self%use_fe)
+      call self%register_state_dependency(self%id_fe3ox,   'fe3ox',   'mmol m-3',    'Particulate reactive Fe(III) oxide/hydroxide', required=self%use_fe)
       call self%register_state_dependency(self%id_sulfide, 'sulfide', 'mmol m-3',    'Dissolved sulfide', required=.true.)
       call self%register_state_dependency(self%id_o2,      'o2',      'mmol m-3',    'Dissolved oxygen', required=.true.)
       call self%register_state_dependency(self%id_so4,     'so4',     'mmol m-3',    'Sulfate', required=.true.)
@@ -156,8 +159,11 @@ contains
 
       _LOOP_BEGIN_
 
-         _GET_(self%id_fe2,     fe2)
-         _GET_(self%id_sulfide, sulfide)
+         fe2 = 0.0_rk; sulfide = 0.0_rk
+         if (self%use_fe) then
+            _GET_(self%id_fe2, fe2)
+            _GET_(self%id_sulfide, sulfide)
+         end if
          _GET_(self%id_o2,      o2)
          _GET_(self%id_pyrite,  pyrite)
 
@@ -213,7 +219,8 @@ contains
          ! Fe2 and sulfide are dissolved, so the base rate is dissolved-phase.
          ! Pyrite production is converted to particulate phase with d2p.
          !--------------------------------------------------------------------
-         pyrite_form = self%k_pyrite_form * max(fe2, 0.0_rk) * max(sulfide, 0.0_rk)
+         pyrite_form = 0.0_rk
+         if (self%use_fe) pyrite_form = self%k_pyrite_form * max(fe2, 0.0_rk) * max(sulfide, 0.0_rk)
 
          pyrite_prod_part        = d2p * pyrite_form
          alk_change_pyrite_form  = alk_per_pyrite_form * pyrite_form
@@ -239,16 +246,18 @@ contains
          !--------------------------------------------------------------------
 
          ! Pyrite precipitation
-         _ADD_SOURCE_(self%id_fe2,     -pyrite_form)
-         _ADD_SOURCE_(self%id_sulfide, -2.0_rk * pyrite_form)
-         _ADD_SOURCE_(self%id_pyrite,   pyrite_prod_part)
-         if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_change_pyrite_form)
+         if (self%use_fe) then
+            _ADD_SOURCE_(self%id_fe2,     -pyrite_form)
+            _ADD_SOURCE_(self%id_sulfide, -2.0_rk * pyrite_form)
+            _ADD_SOURCE_(self%id_pyrite,   pyrite_prod_part)
+            if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_change_pyrite_form)
+         end if
 
          ! Pyrite oxidation by O2
          _ADD_SOURCE_(self%id_pyrite, -pyrite_ox_o2)
          _ADD_SOURCE_(self%id_o2,      o2_from_pyrite_ox)
          _ADD_SOURCE_(self%id_so4,     so4_from_pyrite_ox)
-         _ADD_SOURCE_(self%id_fe3ox,   fe3ox_from_pyrite_ox)
+         if (self%use_fe) _ADD_SOURCE_(self%id_fe3ox, fe3ox_from_pyrite_ox)
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_change_pyrite_ox)
 
          ! Diagnostics
