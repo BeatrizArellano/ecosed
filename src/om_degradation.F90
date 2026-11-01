@@ -20,6 +20,7 @@ module om_degradation
       type(type_state_variable_id) :: id_fe2, id_fe3ox
       type(type_state_variable_id) :: id_so4, id_sulfide
       type(type_state_variable_id) :: id_ch4
+      type(type_state_variable_id) :: id_pyrite
 
       !--- Optional Coupling
       type(type_state_variable_id) :: id_dic, id_alk      
@@ -48,6 +49,7 @@ module om_degradation
       type(type_diagnostic_variable_id) :: id_alk_prod_so4
       type(type_diagnostic_variable_id) :: id_alk_prod_ch4
       type(type_diagnostic_variable_id) :: id_alk_prod_rem
+      type(type_diagnostic_variable_id) :: id_pyrite_form, id_alk_prod_pyrite
 
       ! --- Parameters
       real(rk) :: frac_lab, frac_semi, frac_ref
@@ -73,6 +75,8 @@ module om_degradation
       real(rk) :: ki_so4_redox   
       real(rk) :: atten
 
+      real(rk) :: p_fe
+      logical :: form_pyrite
       logical :: save_process_rates
       logical :: save_alkalinity_changes
 
@@ -131,6 +135,11 @@ contains
       call self%get_parameter(self%save_process_rates, 'process_rates', '', 'Save process-rate diagnostics', default=.false.)
       call self%get_parameter(self%save_alkalinity_changes, 'alkalinity_changes', '', 'Save alkalinity-change diagnostics', default=.false.)
 
+      call self%get_parameter(self%form_pyrite, 'form_pyrite', '', &
+           'Prescribed pyrite formation; WARNING: pyrite/use_fe must be false to avoid double formation', default=.false.)
+      call self%get_parameter(self%p_fe, 'p_fe', '-', 'van de Velde pyritisation parameter', &
+           default=0.0_rk, minimum=0.0_rk, maximum=8.0_rk/15.0_rk)
+
       ! ---------------- State variables ----------------
       call self%register_state_variable(self%id_pom_l, 'pom_l', 'mmol N m-3', 'POM labile',      0.001_rk, minimum=0.0_rk, vertical_movement=w_pom)
       call self%register_state_variable(self%id_pom_s, 'pom_s', 'mmol N m-3', 'POM semi-labile', 0.001_rk, minimum=0.0_rk, vertical_movement=w_pom)
@@ -158,6 +167,8 @@ contains
       call self%register_state_dependency(self%id_so4, 'so4', 'mmol m-3', 'Dissolved sulfate', required=.false.)
       call self%register_state_dependency(self%id_sulfide, 'sulfide', 'mmol m-3', 'Total dissolved sulfide', required=.false.)
       call self%register_state_dependency(self%id_ch4, 'ch4', 'mmol m-3', 'Dissolved methane', required=.false.)
+      call self%register_state_dependency(self%id_pyrite, 'pyrite', 'mmol m-3', &
+           'Particulate pyrite', required=self%form_pyrite)
 
       call self%register_state_dependency(self%id_dic, 'dic', 'mmol m-3', 'Total dissolved inorganic carbon', required=.false.)
       call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.) 
@@ -170,7 +181,9 @@ contains
       ! ---------------- Diagnostics ----------------      
       call self%register_diagnostic_variable(self%id_total_pom, 'total_pom', 'mmol N m-3', 'Total particulate organic matter')
       if (self%save_process_rates) then
-         call self%register_diagnostic_variable(self%id_rem, 'REM', 'mmol N m-3 d-1', 'Total organic matter remineralisation rate')
+         if (self%form_pyrite) call self%register_diagnostic_variable(self%id_pyrite_form, &
+               'PYRITE_FORM', 'mmol m-3 d-1', 'Prescribed pyrite formation per solid volume')
+          call self%register_diagnostic_variable(self%id_rem, 'REM', 'mmol N m-3 d-1', 'Total organic matter remineralisation rate')
          call self%register_diagnostic_variable(self%id_rem_aer, 'REM_AER', 'mmol N m-3 d-1', 'Aerobic remineralisation rate')
          call self%register_diagnostic_variable(self%id_rem_denit, 'REM_DENIT', 'mmol N m-3 d-1', 'Denitrification remineralisation rate')
          call self%register_diagnostic_variable(self%id_rem_mn, 'REM_MN', 'mmol N m-3 d-1', 'Mn oxide reduction remineralisation rate')
@@ -181,7 +194,9 @@ contains
       end if
 
       if (self%save_alkalinity_changes) then
-         call self%register_diagnostic_variable(self%id_alk_prod_aer, 'ALK_PROD_AER', 'mmol eq m-3 d-1', 'Alkalinity change due to aerobic remineralisation')
+         if (self%form_pyrite) call self%register_diagnostic_variable(self%id_alk_prod_pyrite, &
+               'ALK_PROD_PYRITE', 'mmol eq m-3 d-1', 'Incremental TA from pyrite formation')
+          call self%register_diagnostic_variable(self%id_alk_prod_aer, 'ALK_PROD_AER', 'mmol eq m-3 d-1', 'Alkalinity change due to aerobic remineralisation')
          call self%register_diagnostic_variable(self%id_alk_prod_denit, 'ALK_PROD_DENIT', 'mmol eq m-3 d-1', 'Alkalinity change due to denitrification')
          call self%register_diagnostic_variable(self%id_alk_prod_mn, 'ALK_PROD_MN', 'mmol eq m-3 d-1', 'Alkalinity change due to Mn oxide reduction')
          call self%register_diagnostic_variable(self%id_alk_prod_fe, 'ALK_PROD_FE', 'mmol eq m-3 d-1', 'Alkalinity change due to iron reduction')
@@ -233,6 +248,7 @@ contains
       real(rk) :: c_remin_mn, mno2_cons_mn, mn2_prod_mn
       real(rk) :: c_remin_fe, fe3ox_cons_fe, fe2_prod_fe
       real(rk) :: c_remin_so4, so4_cons, sulfide_prod
+      real(rk) :: pyrite_prod, alk_prod_pyrite
       real(rk) :: c_remin_ch4, ch4_prod, alk_prod_ch4
       real(rk) :: alk_prod_aer, alk_prod_denit, alk_prod_mn, alk_prod_fe, alk_prod_so4, alk_prod_tot
 
@@ -586,6 +602,8 @@ contains
          !
          rem_pom_l_so4 = 0.0_rk; rem_pom_s_so4 = 0.0_rk; rem_pom_r_so4 = 0.0_rk
          rem_so4_total = 0.0_rk; so4_cons      = 0.0_rk; sulfide_prod  = 0.0_rk
+          c_remin_so4 = 0.0_rk
+          pyrite_prod = 0.0_rk; alk_prod_pyrite = 0.0_rk
          alk_prod_so4  = 0.0_rk
 
          if (use_so4) then
@@ -611,6 +629,16 @@ contains
             alk_prod_so4 = rem_pom_l_so4 * (self%c_to_n_pom_l + 1.0_rk - 1.0_rk/self%n_to_p_pom_l) &
                          + rem_pom_s_so4 * (self%c_to_n_pom_s + 1.0_rk - 1.0_rk/self%n_to_p_pom_s) &
                          + rem_pom_r_so4 * (self%c_to_n_pom_r + 1.0_rk - 1.0_rk/self%n_to_p_pom_r)
+         end if
+
+         ! Net FeOOH-coupled pyrite reaction (van de Velde), sediment only.
+         ! Per mol FeS2: -15/8 H2S, -1/8 SO4, +1/4 TA; FeOOH implicit.
+         ! WARNING: pyrite/use_fe must be false to prevent double formation.
+         if (self%form_pyrite .and. .not. is_water) then
+            pyrite_prod = (4.0_rk*self%p_fe/(16.0_rk-15.0_rk*self%p_fe))*c_remin_so4
+            sulfide_prod = sulfide_prod - p2d*(15.0_rk/8.0_rk)*pyrite_prod
+            so4_cons = so4_cons + p2d*(1.0_rk/8.0_rk)*pyrite_prod
+            alk_prod_pyrite = 0.25_rk*pyrite_prod
          end if
 
          ! ------------------------------------------------------------------------
@@ -690,7 +718,7 @@ contains
 
          ! Alkalinity
          ! Convert alkalinity production from solid-phase volume units to porewater-volume units.
-         alk_prod_tot = p2d * (alk_prod_aer + alk_prod_denit + alk_prod_mn + alk_prod_fe + alk_prod_so4 + alk_prod_ch4)
+         alk_prod_tot = p2d * (alk_prod_aer + alk_prod_denit + alk_prod_mn + alk_prod_fe + alk_prod_so4 + alk_prod_ch4 + alk_prod_pyrite)
          
 
          !-------------------------------------------------------------------------
@@ -718,6 +746,7 @@ contains
             _ADD_SOURCE_(self%id_sulfide,  sulfide_prod)
          end if
          if (use_ch4) _ADD_SOURCE_(self%id_ch4, ch4_prod)
+         if (self%form_pyrite .and. .not. is_water) _ADD_SOURCE_(self%id_pyrite, pyrite_prod)
 
          if (_AVAILABLE_(self%id_dic)) _ADD_SOURCE_(self%id_dic, dic_prod_rem)         
          if (_AVAILABLE_(self%id_alk)) _ADD_SOURCE_(self%id_alk, alk_prod_tot)        
@@ -725,6 +754,7 @@ contains
          _SET_DIAGNOSTIC_(self%id_total_pom, pom_l + pom_s + pom_r)
 
          if (self%save_process_rates) then
+            if (self%form_pyrite) _SET_DIAGNOSTIC_(self%id_pyrite_form, pyrite_prod*secs_pr_day)
             _SET_DIAGNOSTIC_(self%id_rem,         rem_total       * secs_pr_day)
             _SET_DIAGNOSTIC_(self%id_rem_aer,     rem_aer_total   * secs_pr_day)
             _SET_DIAGNOSTIC_(self%id_rem_denit,   rem_denit_total * secs_pr_day)
@@ -736,6 +766,7 @@ contains
          end if
 
          if (self%save_alkalinity_changes) then
+            if (self%form_pyrite) _SET_DIAGNOSTIC_(self%id_alk_prod_pyrite, p2d*alk_prod_pyrite*secs_pr_day)
             _SET_DIAGNOSTIC_(self%id_alk_prod_aer,   p2d * alk_prod_aer   * secs_pr_day)
             _SET_DIAGNOSTIC_(self%id_alk_prod_denit, p2d * alk_prod_denit * secs_pr_day)
             _SET_DIAGNOSTIC_(self%id_alk_prod_mn,    p2d * alk_prod_mn    * secs_pr_day)
