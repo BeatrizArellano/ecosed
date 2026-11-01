@@ -164,8 +164,8 @@ contains
       call self%register_state_dependency(self%id_mno2, 'mno2', 'mmol m-3', 'Particulate Mn(IV) oxide', required=.false.)
       call self%register_state_dependency(self%id_fe2, 'fe2', 'mmol m-3', 'Dissolved Fe(II)', required=.false.)
       call self%register_state_dependency(self%id_fe3ox, 'fe3ox', 'mmol m-3', 'Particulate Fe(III) oxides/hydroxides', required=.false.)
-      call self%register_state_dependency(self%id_so4, 'so4', 'mmol m-3', 'Dissolved sulfate', required=.false.)
-      call self%register_state_dependency(self%id_sulfide, 'sulfide', 'mmol m-3', 'Total dissolved sulfide', required=.false.)
+      call self%register_state_dependency(self%id_so4, 'so4', 'mmol m-3', 'Dissolved sulfate', required=self%form_pyrite)
+      call self%register_state_dependency(self%id_sulfide, 'sulfide', 'mmol m-3', 'Total dissolved sulfide', required=self%form_pyrite)
       call self%register_state_dependency(self%id_ch4, 'ch4', 'mmol m-3', 'Dissolved methane', required=.false.)
       call self%register_state_dependency(self%id_pyrite, 'pyrite', 'mmol m-3', &
            'Particulate pyrite', required=self%form_pyrite)
