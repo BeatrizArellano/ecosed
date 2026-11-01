@@ -111,7 +111,7 @@ contains
       ! ---------------- Couplings ----------------
       call self%register_state_dependency(self%id_fe2,     'fe2',     'mmol m-3',    'Dissolved Fe(II)', required=self%use_fe)
       call self%register_state_dependency(self%id_fe3ox,   'fe3ox',   'mmol m-3',    'Particulate reactive Fe(III) oxide/hydroxide', required=self%use_fe)
-      call self%register_state_dependency(self%id_sulfide, 'sulfide', 'mmol m-3',    'Dissolved sulfide', required=.true.)
+      call self%register_state_dependency(self%id_sulfide, 'sulfide', 'mmol m-3',    'Dissolved sulfide', required=self%use_fe)
       call self%register_state_dependency(self%id_o2,      'o2',      'mmol m-3',    'Dissolved oxygen', required=.true.)
       call self%register_state_dependency(self%id_so4,     'so4',     'mmol m-3',    'Sulfate', required=.true.)
       call self%register_state_dependency(self%id_alk,     'alk',     'mmol eq m-3', 'Total alkalinity', required=.false.)
