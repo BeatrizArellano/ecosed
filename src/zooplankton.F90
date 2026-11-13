@@ -7,8 +7,9 @@
 ! Prey-specific availability/preference coefficients determine how strongly each prey contributes to
 ! total perceived food and how total grazing is distributed among prey.
 !
-! Grazed material is partitioned into sloppy feeding losses, egestion, zooplankton growth,
-! nitrogen excretion, and carbon respiration.
+! Grazed material is partitioned into sloppy feeding losses (POM), egestion
+! (faecal particles, POM), assimilated material for growth, nitrogen excretion
+! to NH4, and carbon respiration to DIC. Mortality also contributes to POM.
 !
 ! Particulate losses contribute to the shared pelagic POM-production aggregate.
 ! A fixed Redfield C:N ratio is used to convert ingested prey nitrogen to carbon.
@@ -298,6 +299,12 @@ contains
 
          if (.not. is_sediment) then
 
+            ! Holling-II grazing (legacy one-prey limit):
+            !   G = g_max * zoo * phy / (k_g + phy).
+            ! For multiple prey, use food = sum(pref_i * prey_i) in the denominator
+            ! and distribute G among prey in proportion to pref_i * prey_i.
+            ! Preference coefficients are relative weighting factors, not probabilities.
+            ! The total grazing capacity does not multiply by the number of prey types.
             ! Preference-weighted total prey biomass perceived by zooplankton.
             food = 0.0_rk
             do iprey = 1, self%nprey
@@ -322,29 +329,38 @@ contains
             ing_n = graze
             ing_c = redfield_c_to_n * graze
 
-            ! A fraction of ingestion is lost directly as particulate matter.
+            ! Sloppy feeding: the fraction sloppy_feed of grazed material is lost
+            ! directly to POM before assimilation (as in the legacy model).
             sloppy_n = self%sloppy_feed * ing_n
 
             ! Remaining ingested material is available for assimilation.
             assim_n = max(0.0_rk, (1.0_rk - self%sloppy_feed) * ing_n)
             assim_c = max(0.0_rk, (1.0_rk - self%sloppy_feed) * ing_c)
 
-            ! Non-assimilated nitrogen is egested as particulate matter.
+            ! Egestion (faecal material): (1 - beta_n) * remaining ingested N.
+            ! As in the old model, only beta_n sets this N-partitioning loss;
+            ! beta_c influences carbon-limited growth and respiration below.
             egestion_n = (1.0_rk - self%beta_n) * assim_n
 
-            ! Potential growth supported independently by assimilated N and C.
+            ! Nitrogen-limited growth potential = beta_n * assimilated N.
+            ! Carbon-limited growth potential = beta_c * k_zoo * assimilated C / C:N.
+            ! Here k_zoo denotes the fraction of assimilated carbon potentially
+            ! allocated to zooplankton production; the rest is not assigned
+            ! explicitly to a separate state variable.
             grow_n_pot = self%beta_n * assim_n
             grow_c_pot = self%beta_c * self%k_zoo * assim_c / redfield_c_to_n
 
             ! Actual zooplankton growth is limited by the more restrictive element.
             zoo_growth = min(grow_n_pot, grow_c_pot)
 
-            ! Assimilated material not incorporated into zooplankton biomass is returned
-            ! to dissolved pools as NH4 and DIC.
+            ! Excess assimilated N is excreted to NH4 and excess assimilated C
+            ! is respired to DIC, using the same equations as the legacy model.
+            ! Both fluxes are non-negative and depend on the limiting element.
             zoo_excr_n = max(0.0_rk, self%beta_n * assim_n - zoo_growth)
             zoo_resp_c = max(0.0_rk, self%beta_c * assim_c - redfield_c_to_n * zoo_growth)
 
-            ! Quadratic mortality contributes to POM.
+            ! Quadratic mortality = m_zoo2 * zoo^2, representing density-dependent
+            ! biomass loss transferred to POM, as in the legacy model.
             mortality = self%m_zoo2 * biomass * biomass
 
             biomass_source = zoo_growth - mortality
@@ -354,7 +370,12 @@ contains
             nh4_change = zoo_excr_n
             dic_change = zoo_resp_c
 
-            ! Respiration/excretion alkalinity term retained from the original model.
+            ! Alkalinity associated with excretion / remineralisation of organic N.
+            ! Middelburg et al. (2020): organic-matter oxidation releases NH3 and
+            ! phosphate, with alkalinity change n/c - p/c per mol organic C,
+            ! or 1 - p/n per mol N (n:p = 16 here).
+            ! As in the legacy model, this term uses excreted N (zoo_excr_n),
+            ! not respired C (zoo_resp_c); it is a stoichiometric simplification.
             alk_change = zoo_excr_n - zoo_excr_n / n_to_p
 
             o2_cons = self%o2_per_c * zoo_resp_c
@@ -365,8 +386,9 @@ contains
             !-------------------------------------------------------------------------------------------
             ! Sediment layers
             !
-            ! Pelagic zooplankton entering sediment cells are rapidly removed and transferred
-            ! to particulate organic matter. Grazing is disabled in sediment cells.
+            ! Pelagic zooplankton entering sediment cells are rapidly removed
+            ! (200 d-1) and transferred to POM, following the legacy model.
+            ! Grazing, excretion, respiration and active zoo growth are disabled.
             !-------------------------------------------------------------------------------------------
 
             biomass_kill = k_sed_kill_zoo * biomass
