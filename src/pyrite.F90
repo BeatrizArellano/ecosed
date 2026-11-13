@@ -121,19 +121,21 @@ contains
          if (self%use_fe) then
             call self%register_diagnostic_variable(self%id_pyrite_form, &
                  'PYRITE_FORM', 'mmol m-3 d-1', &
-                 'Pyrite formation rate from Fe2 and sulfide')
+                 'Pyrite formation rate from Fe2 and sulfide; per porewater volume in sediment (per water volume otherwise)')
          end if
-         call self%register_diagnostic_variable(self%id_pyrite_ox_o2, 'PYRITE_OX_O2', 'mmol m-3 d-1', 'Pyrite oxidation rate by oxygen')
+         call self%register_diagnostic_variable(self%id_pyrite_ox_o2, 'PYRITE_OX_O2', 'mmol m-3 d-1', &
+            'Pyrite oxidation rate by oxygen; per solid volume in sediment (per water volume otherwise)')
       end if
 
       if (self%save_alkalinity_changes) then
          if (self%use_fe) then
             call self%register_diagnostic_variable(self%id_alk_pyrite_form, &
                  'ALK_PYRITE_FORM', 'mmol eq m-3 d-1', &
-                 'Alkalinity change due to pyrite formation')
+                 'Alkalinity change due to pyrite formation; per porewater volume in sediment (per water volume otherwise)')
          end if
          call self%register_diagnostic_variable(self%id_alk_pyrite_ox, 'ALK_PYRITE_OX', 'mmol eq m-3 d-1', &
-                                                'Alkalinity change due to pyrite oxidation')
+                                                'Alkalinity change due to pyrite oxidation; per ' // &
+            'porewater volume in sediment (per water volume otherwise)')
       end if
 
    end subroutine initialize
