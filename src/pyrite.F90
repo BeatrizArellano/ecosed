@@ -118,12 +118,12 @@ contains
 
       ! ---------------- Diagnostics ----------------
       if (self%save_process_rates) then
-         call self%register_diagnostic_variable(self%id_pyrite_form, 'PYRITE_FORM', 'mmol m-3 d-1', 'Pyrite formation rate from Fe2 and sulfide')
+         if (self%use_fe) call self%register_diagnostic_variable(self%id_pyrite_form, 'PYRITE_FORM', 'mmol m-3 d-1', 'Pyrite formation rate from Fe2 and sulfide')
          call self%register_diagnostic_variable(self%id_pyrite_ox_o2, 'PYRITE_OX_O2', 'mmol m-3 d-1', 'Pyrite oxidation rate by oxygen')
       end if
 
       if (self%save_alkalinity_changes) then
-         call self%register_diagnostic_variable(self%id_alk_pyrite_form, 'ALK_PYRITE_FORM', 'mmol eq m-3 d-1', &
+         if (self%use_fe) call self%register_diagnostic_variable(self%id_alk_pyrite_form, 'ALK_PYRITE_FORM', 'mmol eq m-3 d-1', &
                                                 'Alkalinity change due to pyrite formation')
          call self%register_diagnostic_variable(self%id_alk_pyrite_ox, 'ALK_PYRITE_OX', 'mmol eq m-3 d-1', &
                                                 'Alkalinity change due to pyrite oxidation')
@@ -262,12 +262,12 @@ contains
 
          ! Diagnostics
          if (self%save_process_rates) then
-            _SET_DIAGNOSTIC_(self%id_pyrite_form,  pyrite_form * secs_per_day)
+            if (self%use_fe) _SET_DIAGNOSTIC_(self%id_pyrite_form,  pyrite_form * secs_per_day)
             _SET_DIAGNOSTIC_(self%id_pyrite_ox_o2, pyrite_ox_o2 * secs_per_day)
          end if
 
          if (self%save_alkalinity_changes) then
-            _SET_DIAGNOSTIC_(self%id_alk_pyrite_form, alk_change_pyrite_form * secs_per_day)
+            if (self%use_fe) _SET_DIAGNOSTIC_(self%id_alk_pyrite_form, alk_change_pyrite_form * secs_per_day)
             _SET_DIAGNOSTIC_(self%id_alk_pyrite_ox, alk_change_pyrite_ox * secs_per_day)
          end if
 
