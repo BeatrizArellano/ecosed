@@ -386,7 +386,7 @@ contains
 
             ! Changes in DIC
             ! DIC decreases through carbon fixation and calcite precipitation.
-             dic_change = -redfield_c_to_n * tpp - calcite_prod
+            dic_change = -redfield_c_to_n * tpp - calcite_prod
 
             ! Changes in Alkalinity
             ! New production removes NO3- increasing alkalinity, while consumption of NH4 decreases it. 
@@ -449,7 +449,7 @@ contains
             _ADD_SOURCE_(self%id_o2, o2_change)
          end if
 
-          if (self%calcify) _ADD_SOURCE_(self%id_calcite, calcite_prod)
+         if (self%calcify) _ADD_SOURCE_(self%id_calcite, calcite_prod)
 
          !----------------------------------------------------------------------------------------------
          ! Aggregate contributions
@@ -474,7 +474,7 @@ contains
 
          if (self%save_alkalinity_changes) then
             _SET_DIAGNOSTIC_(self%id_alk_pp, (alk_change + 2.0_rk * calcite_prod) * secs_pr_day)
-             if (self%calcify) _SET_DIAGNOSTIC_(self%id_alk_calcite, -2.0_rk * calcite_prod * secs_pr_day)
+            if (self%calcify) _SET_DIAGNOSTIC_(self%id_alk_calcite, -2.0_rk * calcite_prod * secs_pr_day)
          end if
 
       _LOOP_END_
