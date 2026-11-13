@@ -179,30 +179,48 @@ contains
       call self%register_dependency(self%id_pom_prod_n, pom_production_n)
 
       ! ---------------- Diagnostics ----------------      
-      call self%register_diagnostic_variable(self%id_total_pom, 'total_pom', 'mmol N m-3', 'Total particulate organic matter')
+      call self%register_diagnostic_variable(self%id_total_pom, 'total_pom', 'mmol N m-3', &
+         'Total particulate organic matter; per solid volume in sediment (per water volume otherwise)')
       if (self%save_process_rates) then
          if (self%form_pyrite) call self%register_diagnostic_variable(self%id_pyrite_form, &
-               'PYRITE_FORM', 'mmol m-3 d-1', 'Prescribed pyrite formation per solid volume')
-          call self%register_diagnostic_variable(self%id_rem, 'REM', 'mmol N m-3 d-1', 'Total organic matter remineralisation rate')
-         call self%register_diagnostic_variable(self%id_rem_aer, 'REM_AER', 'mmol N m-3 d-1', 'Aerobic remineralisation rate')
-         call self%register_diagnostic_variable(self%id_rem_denit, 'REM_DENIT', 'mmol N m-3 d-1', 'Denitrification remineralisation rate')
-         call self%register_diagnostic_variable(self%id_rem_mn, 'REM_MN', 'mmol N m-3 d-1', 'Mn oxide reduction remineralisation rate')
-         call self%register_diagnostic_variable(self%id_rem_fe, 'REM_FE', 'mmol N m-3 d-1', 'Fe oxide reduction remineralisation rate')
-         call self%register_diagnostic_variable(self%id_rem_so4, 'REM_SO4', 'mmol N m-3 d-1', 'Sulfate reduction remineralisation rate')
-         call self%register_diagnostic_variable(self%id_rem_ch4, 'REM_CH4', 'mmol N m-3 d-1', 'Methanogenic remineralisation rate')
-         call self%register_diagnostic_variable(self%id_nloss_denit, 'NLOSS_DENIT', 'mmol N m-3 d-1', 'N loss to N2 by denitrification')
+               'PYRITE_FORM', 'mmol m-3 d-1', &
+                  'Prescribed pyrite formation rate; per solid volume in sediment (per water volume otherwise)')
+          call self%register_diagnostic_variable(self%id_rem, 'REM', 'mmol N m-3 d-1', &
+             'Total organic matter remineralisation rate; per solid volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_rem_aer, 'REM_AER', 'mmol N m-3 d-1', &
+            'Aerobic remineralisation rate; per solid volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_rem_denit, 'REM_DENIT', 'mmol N m-3 d-1', &
+            'Denitrification remineralisation rate; per solid volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_rem_mn, 'REM_MN', 'mmol N m-3 d-1', &
+            'Mn oxide reduction remineralisation rate; per solid volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_rem_fe, 'REM_FE', 'mmol N m-3 d-1', &
+            'Fe oxide reduction remineralisation rate; per solid volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_rem_so4, 'REM_SO4', 'mmol N m-3 d-1', &
+            'Sulfate reduction remineralisation rate; per solid volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_rem_ch4, 'REM_CH4', 'mmol N m-3 d-1', &
+            'Methanogenic remineralisation rate; per solid volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_nloss_denit, 'NLOSS_DENIT', 'mmol N m-3 d-1', &
+            'N loss to N2 by denitrification; per porewater volume in sediment (per water volume otherwise)')
       end if
 
       if (self%save_alkalinity_changes) then
          if (self%form_pyrite) call self%register_diagnostic_variable(self%id_alk_prod_pyrite, &
-               'ALK_PROD_PYRITE', 'mmol eq m-3 d-1', 'Incremental TA from pyrite formation')
-          call self%register_diagnostic_variable(self%id_alk_prod_aer, 'ALK_PROD_AER', 'mmol eq m-3 d-1', 'Alkalinity change due to aerobic remineralisation')
-         call self%register_diagnostic_variable(self%id_alk_prod_denit, 'ALK_PROD_DENIT', 'mmol eq m-3 d-1', 'Alkalinity change due to denitrification')
-         call self%register_diagnostic_variable(self%id_alk_prod_mn, 'ALK_PROD_MN', 'mmol eq m-3 d-1', 'Alkalinity change due to Mn oxide reduction')
-         call self%register_diagnostic_variable(self%id_alk_prod_fe, 'ALK_PROD_FE', 'mmol eq m-3 d-1', 'Alkalinity change due to iron reduction')
-         call self%register_diagnostic_variable(self%id_alk_prod_so4, 'ALK_PROD_SO4', 'mmol eq m-3 d-1', 'Alkalinity change due to sulfate reduction')
-         call self%register_diagnostic_variable(self%id_alk_prod_ch4, 'ALK_PROD_CH4', 'mmol eq m-3 d-1', 'Alkalinity change due to methanogenesis')
-         call self%register_diagnostic_variable(self%id_alk_prod_rem, 'ALK_PROD_REM', 'mmol eq m-3 d-1', 'Net alkalinity change due to organic matter remineralisation')
+               'ALK_PROD_PYRITE', 'mmol eq m-3 d-1', &
+                  'Incremental TA from pyrite formation; per porewater volume in sediment (per water volume otherwise)')
+          call self%register_diagnostic_variable(self%id_alk_prod_aer, 'ALK_PROD_AER', 'mmol eq m-3 d-1', &
+             'Alkalinity change due to aerobic remineralisation; per porewater volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_alk_prod_denit, 'ALK_PROD_DENIT', 'mmol eq m-3 d-1', &
+            'Alkalinity change due to denitrification; per porewater volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_alk_prod_mn, 'ALK_PROD_MN', 'mmol eq m-3 d-1', &
+            'Alkalinity change due to Mn oxide reduction; per porewater volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_alk_prod_fe, 'ALK_PROD_FE', 'mmol eq m-3 d-1', &
+            'Alkalinity change due to iron reduction; per porewater volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_alk_prod_so4, 'ALK_PROD_SO4', 'mmol eq m-3 d-1', &
+            'Alkalinity change due to sulfate reduction; per porewater volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_alk_prod_ch4, 'ALK_PROD_CH4', 'mmol eq m-3 d-1', &
+            'Alkalinity change due to methanogenesis; per porewater volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_alk_prod_rem, 'ALK_PROD_REM', 'mmol eq m-3 d-1', &
+            'Net alkalinity change due to organic matter remineralisation; per porewater volume in sediment (per water volume otherwise)')
       end if
 
    end subroutine initialize

@@ -87,12 +87,15 @@ contains
         call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.) 
         ! ---------------- Diagnostics ----------------
         if (self%save_process_rates) then
-            call self%register_diagnostic_variable(self%id_ch4_ox, 'CH4_OX', 'mmol m-3 d-1', 'Aerobic methane oxidation rate')
-            call self%register_diagnostic_variable(self%id_ch4_an, 'CH4_AN', 'mmol m-3 d-1', 'Anaerobic methane oxidation rate via SO4')
+            call self%register_diagnostic_variable(self%id_ch4_ox, 'CH4_OX', 'mmol m-3 d-1', &
+            'Aerobic methane oxidation rate; per porewater volume in sediment (per water volume otherwise)')
+            call self%register_diagnostic_variable(self%id_ch4_an, 'CH4_AN', 'mmol m-3 d-1', &
+            'Anaerobic methane oxidation rate via SO4; per porewater volume in sediment (per water volume otherwise)')
         end if
 
         if (self%save_alkalinity_changes) then
-            call self%register_diagnostic_variable(self%id_alk_ch4_an, 'ALK_CH4_ANOX', 'mmol eq m-3 d-1', 'Alkalinity change due to anaerobic methane oxidation')
+            call self%register_diagnostic_variable(self%id_alk_ch4_an, 'ALK_CH4_ANOX', 'mmol eq m-3 d-1', &
+            'Alkalinity change due to anaerobic methane oxidation; per porewater volume in sediment (per water volume otherwise)')
         end if
 
     end subroutine initialize 

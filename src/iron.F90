@@ -101,13 +101,17 @@ contains
 
       ! ---------------- Diagnostics ----------------
       if (self%save_process_rates) then
-         call self%register_diagnostic_variable(self%id_fe_o2_ox, 'FE_OX', 'mmol m-3 d-1', 'Fe(II) oxidation rate by oxygen')
-         call self%register_diagnostic_variable(self%id_fe_mno2_ox, 'FE_MNO2_OX', 'mmol m-3 d-1', 'Fe(II) oxidation by MnO2')
+         call self%register_diagnostic_variable(self%id_fe_o2_ox, 'FE_OX', 'mmol m-3 d-1', &
+            'Fe(II) oxidation rate by oxygen; per porewater volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_fe_mno2_ox, 'FE_MNO2_OX', 'mmol m-3 d-1', &
+            'Fe(II) oxidation by MnO2; per solid volume in sediment (per water volume otherwise)')
       end if
 
       if (self%save_alkalinity_changes) then
-         call self%register_diagnostic_variable(self%id_alk_fe_o2_ox, 'ALK_FE_OX', 'mmol eq m-3 d-1', 'Alkalinity change due to Fe(II) oxidation by oxygen')
-         call self%register_diagnostic_variable(self%id_alk_fe_mno2_ox, 'ALK_FE_MNO2_OX', 'mmol eq m-3 d-1', 'Alkalinity change due to Fe(II) oxidation by MnO2')
+         call self%register_diagnostic_variable(self%id_alk_fe_o2_ox, 'ALK_FE_OX', 'mmol eq m-3 d-1', &
+            'Alkalinity change due to Fe(II) oxidation by oxygen; per porewater volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_alk_fe_mno2_ox, 'ALK_FE_MNO2_OX', 'mmol eq m-3 d-1', &
+            'Alkalinity change due to Fe(II) oxidation by MnO2; per porewater volume in sediment (per water volume otherwise)')
       end if
 
    end subroutine initialize

@@ -107,15 +107,19 @@ contains
 
       ! ---------------- Diagnostics ----------------
       if (self%save_process_rates) then
-         call self%register_diagnostic_variable(self%id_calcite_diss, 'CALCITE_DISS', 'mmol m-3 d-1', 'Calcite dissolution rate')
-         call self%register_diagnostic_variable(self%id_calcite_precip, 'CALCITE_PRECIP', 'mmol m-3 d-1', 'Abiotic calcite precipitation rate')
+         call self%register_diagnostic_variable(self%id_calcite_diss, 'CALCITE_DISS', 'mmol m-3 d-1', &
+            'Calcite dissolution rate; per solid volume in sediment (per water volume otherwise)')
+         call self%register_diagnostic_variable(self%id_calcite_precip, 'CALCITE_PRECIP', 'mmol m-3 d-1', &
+            'Abiotic calcite precipitation rate; per solid volume in sediment (per water volume otherwise)')
       end if
 
       if (self%save_alkalinity_changes) then
          call self%register_diagnostic_variable(self%id_alk_calcite_diss, 'ALK_CALCITE_DISS', 'mmol eq m-3 d-1', &
-                                                'Alkalinity change due to calcite dissolution')
+                                                'Alkalinity change due to calcite dissolution; ' // &
+            'per porewater volume in sediment (per water volume otherwise)')
          call self%register_diagnostic_variable(self%id_alk_calcite_precip, 'ALK_CALCITE_PRECIP', 'mmol eq m-3 d-1', &
-                                                'Alkalinity change due to calcite precipitation')
+                                                'Alkalinity change due to calcite precipitation; ' // &
+            'per porewater volume in sediment (per water volume otherwise)')
       end if
 
    end subroutine initialize

@@ -113,13 +113,15 @@ contains
       call self%register_dependency(self%id_pom_prod_n, pom_production_n, required=.false.)
 
       ! ---------------- Diagnostics ----------------
-      call self%register_diagnostic_variable(self%id_total_det, 'total_det', 'mmol N m-3', 'Total detritus')
+      call self%register_diagnostic_variable(self%id_total_det, 'total_det', 'mmol N m-3', 'Total detritus; per water volume')
 
       if (self%save_process_rates) then
-         call self%register_diagnostic_variable(self%id_remin_det, 'REMIN_DET', 'mmol N m-3 d-1', 'Detritus remineralisation rate')
+         call self%register_diagnostic_variable(self%id_remin_det, 'REMIN_DET', 'mmol N m-3 d-1', &
+            'Detritus remineralisation rate; per water volume')
       end if
       if (self%save_alkalinity_changes) then
-         call self%register_diagnostic_variable(self%id_alk_prod_aer, 'ALK_PROD_AER', 'mmol eq m-3 d-1', 'Alkalinity change due to aerobic remineralisation')
+         call self%register_diagnostic_variable(self%id_alk_prod_aer, 'ALK_PROD_AER', 'mmol eq m-3 d-1', &
+            'Alkalinity change due to aerobic remineralisation; per water volume')
       end if
 
    end subroutine initialize
