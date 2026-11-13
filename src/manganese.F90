@@ -91,12 +91,14 @@ contains
 
       ! ---------------- Diagnostics ----------------
       if (self%save_process_rates) then
-         call self%register_diagnostic_variable(self%id_mn_ox, 'MN_OX', 'mmol m-3 d-1', 'Mn(II) oxidation rate')
+         call self%register_diagnostic_variable(self%id_mn_ox, 'MN_OX', 'mmol m-3 d-1', &
+            'Mn(II) oxidation rate; per porewater volume in sediment (per water volume otherwise)')
       end if
 
       if (self%save_alkalinity_changes) then
          call self%register_diagnostic_variable(self%id_alk_mn_ox, 'ALK_MN_OX', 'mmol eq m-3 d-1', &
-                                                'Alkalinity change due to Mn(II) oxidation')
+                                                'Alkalinity change due to Mn(II) oxidation; per ' // &
+            'porewater volume in sediment (per water volume otherwise)')
       end if
 
    end subroutine initialize
