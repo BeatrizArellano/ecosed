@@ -128,7 +128,9 @@ contains
                               default=.false.)
 
       call self%get_parameter(self%save_alkalinity_changes, 'alkalinity_changes', '', 'Save alkalinity-change diagnostics', &
-                              default=.false.)      call self%get_parameter(self%calcify, 'calcify', '', &
+                              default=.false.)
+
+      call self%get_parameter(self%calcify, 'calcify', '', &
                               'Enable PIC production from phytoplankton mortality', default=.false.)
       if (self%calcify) then
          call self%get_parameter(self%rain_ratio, 'rain_ratio', '-', &
@@ -201,7 +203,9 @@ contains
       if (self%save_process_rates) then
 
          call self%register_diagnostic_variable(self%id_TPP, 'TPP', 'mmol N m-3 d-1', &
-                                                'Total primary production (N-based)')         if (self%calcify) then
+                                                'Total primary production (N-based)')
+
+         if (self%calcify) then
             call self%register_diagnostic_variable(self%id_calcite_prod, 'CALCITE_BIO_PRECIP', 'mmol m-3 d-1', &
                                                    'Biotic calcite production accompanying phytoplankton mortality')
          end if
