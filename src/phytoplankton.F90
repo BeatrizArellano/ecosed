@@ -36,11 +36,13 @@ module phytoplankton
       type(type_state_variable_id) :: id_o2
       type(type_state_variable_id) :: id_dic
       type(type_state_variable_id) :: id_alk
+      type(type_state_variable_id) :: id_calcite
 
       ! --- Environmental dependencies
       type(type_dependency_id) :: id_par
       type(type_dependency_id) :: id_temp
       type(type_dependency_id) :: id_porosity
+      type(type_dependency_id) :: id_omega_ca
 
       ! --- Internal diagnostics used for aggregate variables
       type(type_diagnostic_variable_id) :: id_pom_prod_n
@@ -52,6 +54,7 @@ module phytoplankton
       type(type_diagnostic_variable_id) :: id_new_prod
       type(type_diagnostic_variable_id) :: id_reg_prod
       type(type_diagnostic_variable_id) :: id_alk_pp
+      type(type_diagnostic_variable_id) :: id_alk_calcite, id_calcite_prod
 
       ! --- Parameters
       real(rk) :: mu_max
@@ -65,6 +68,10 @@ module phytoplankton
 
       ! --- Optical properties
       real(rk) :: kc
+
+      ! Calcification accompanies POM produced by this group's mortality only.
+      logical :: calcify
+      real(rk) :: rain_ratio
 
       ! --- Diagnostic switches
       logical :: save_process_rates
@@ -121,7 +128,15 @@ contains
                               default=.false.)
 
       call self%get_parameter(self%save_alkalinity_changes, 'alkalinity_changes', '', 'Save alkalinity-change diagnostics', &
-                              default=.false.)
+                              default=.false.)      call self%get_parameter(self%calcify, 'calcify', '', &
+                              'Enable PIC production from phytoplankton mortality', default=.false.)
+      if (self%calcify) then
+         call self%get_parameter(self%rain_ratio, 'rain_ratio', '-', &
+                                 'CaCO3:POC production ratio for phytoplankton mortality', &
+                                 default=0.0_rk, minimum=0.0_rk)
+      end if
+
+
 
       !-------------------------------------------------------------------------------------------------
       ! State variable
@@ -147,8 +162,13 @@ contains
       call self%register_state_dependency(self%id_nh4, 'nh4', 'mmol m-3', 'Dissolved ammonium', required=.true.)
 
       call self%register_state_dependency(self%id_o2, 'o2', 'mmol m-3', 'Dissolved oxygen', required=.false.)
-      call self%register_state_dependency(self%id_dic, 'dic', 'mmol C m-3', 'Total dissolved inorganic carbon', required=.false.)
-      call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', required=.false.)
+      call self%register_state_dependency(self%id_dic, 'dic', 'mmol C m-3', 'Total dissolved inorganic carbon', &
+                                          required=self%calcify)
+      call self%register_state_dependency(self%id_alk, 'alk', 'mmol eq m-3', 'Total alkalinity', &
+                                          required=self%calcify)
+      if (self%calcify) then
+         call self%register_state_dependency(self%id_calcite, 'calcite', 'mmol m-3', 'Particulate calcite', required=.true.)
+      end if
 
       !-------------------------------------------------------------------------------------------------
       ! Environmental dependencies
@@ -157,6 +177,9 @@ contains
       call self%register_dependency(self%id_par, standard_variables%downwelling_photosynthetic_radiative_flux)
       call self%register_dependency(self%id_temp,standard_variables%temperature)
       call self%register_dependency(self%id_porosity, type_interior_standard_variable(name='porosity', units='1'), required=.false.)
+      if (self%calcify) then
+         call self%register_dependency(self%id_omega_ca, 'omega_ca', '1', 'Calcite saturation state', required=.true.)
+      end if
 
       !-------------------------------------------------------------------------------------------------
       ! Internal diagnostics contributing to shared aggregate variables
@@ -178,7 +201,12 @@ contains
       if (self%save_process_rates) then
 
          call self%register_diagnostic_variable(self%id_TPP, 'TPP', 'mmol N m-3 d-1', &
-                                                'Total primary production (N-based)')
+                                                'Total primary production (N-based)')         if (self%calcify) then
+            call self%register_diagnostic_variable(self%id_calcite_prod, 'CALCITE_BIO_PRECIP', 'mmol m-3 d-1', &
+                                                   'Biotic calcite production accompanying phytoplankton mortality')
+         end if
+
+
 
          call self%register_diagnostic_variable(self%id_o2_prod, 'O2_PROD', 'mmol m-3 d-1', &
                                                 'O2 production from primary production')
@@ -195,6 +223,10 @@ contains
 
          call self%register_diagnostic_variable(self%id_alk_pp, 'ALK_PP', 'mmol eq m-3 d-1', &
                                                 'Alkalinity change due to primary production')
+         if (self%calcify) then
+            call self%register_diagnostic_variable(self%id_alk_calcite, 'ALK_CALC_PRECIP', 'mmol eq m-3 d-1', &
+                                                   'Alkalinity change due to biotic calcite precipitation')
+         end if
 
       end if
 
@@ -227,6 +259,7 @@ contains
 
       real(rk) :: pom_prod_n
       real(rk) :: chl_diag
+       real(rk) :: calcite_prod, omega_ca
 
       logical :: is_sediment
 
@@ -255,6 +288,7 @@ contains
          end if
 
          is_sediment = (phi < 1.0_rk - eps)
+          calcite_prod = 0.0_rk
 
          !----------------------------------------------------------------------------------------------
          ! Water column
@@ -331,6 +365,12 @@ contains
             ! Mortality contributes particulate organic matter.
             pom_prod_n = mort_p
 
+             ! No calcification from grazing, egestion or sediment biomass killing.
+             if (self%calcify) then
+                _GET_(self%id_omega_ca, omega_ca)
+                if (omega_ca > 1.0_rk) calcite_prod = self%rain_ratio * redfield_c_to_n * pom_prod_n
+             end if
+
             !-------------------------------------------------------------------------------------------
             ! Dissolved nutrient and carbonate-system effects
             !-------------------------------------------------------------------------------------------
@@ -341,8 +381,8 @@ contains
             dnh4 = -reg_prod
 
             ! Changes in DIC
-            ! DIC decreases through phytoplankton carbon fixation and increases through zooplankton respiration.
-            dic_change = -redfield_c_to_n * tpp
+            ! DIC decreases through carbon fixation and calcite precipitation.
+             dic_change = -redfield_c_to_n * tpp - calcite_prod
 
             ! Changes in Alkalinity
             ! New production removes NO3- increasing alkalinity, while consumption of NH4 decreases it. 
@@ -350,7 +390,7 @@ contains
             ! PP (NO3): CO2 + n/c HNO3 + p/c H3PO4 + (1+n)H2O → (CH2O)(NH3)n(H3PO4)p + (1+2n)O2  Alk change:	p/c + n/c per mol C or p/n+1 per mol N
             ! PP (NH4): CO2 + n/c NH3 + p/c H3PO4 + H2O → (CH2O)(NH3)n(H3PO4)p + O2 Alk change: p/c-n/c per mol C or p/n-1 per mol N 
             alk_change = (1.0_rk + 1.0_rk / n_to_p) * new_prod &
-                       + (-1.0_rk + 1.0_rk / n_to_p) * reg_prod
+                       + (-1.0_rk + 1.0_rk / n_to_p) * reg_prod - 2.0_rk * calcite_prod
 
             ! Oxygen production associated with carbon fixation.
             o2_change = self%o2_per_c * redfield_c_to_n * tpp
@@ -405,6 +445,8 @@ contains
             _ADD_SOURCE_(self%id_o2, o2_change)
          end if
 
+          if (self%calcify) _ADD_SOURCE_(self%id_calcite, calcite_prod)
+
          !----------------------------------------------------------------------------------------------
          ! Aggregate contributions
          !----------------------------------------------------------------------------------------------
@@ -418,7 +460,8 @@ contains
 
          if (self%save_process_rates) then
 
-            _SET_DIAGNOSTIC_(self%id_TPP,      tpp      * secs_pr_day)
+            if (self%calcify) _SET_DIAGNOSTIC_(self%id_calcite_prod, calcite_prod * secs_pr_day)
+             _SET_DIAGNOSTIC_(self%id_TPP,      tpp      * secs_pr_day)
             _SET_DIAGNOSTIC_(self%id_new_prod, new_prod * secs_pr_day)
             _SET_DIAGNOSTIC_(self%id_reg_prod, reg_prod * secs_pr_day)
             _SET_DIAGNOSTIC_(self%id_o2_prod,  o2_change * secs_pr_day)
@@ -426,7 +469,8 @@ contains
          end if
 
          if (self%save_alkalinity_changes) then
-            _SET_DIAGNOSTIC_(self%id_alk_pp, alk_change * secs_pr_day)
+            _SET_DIAGNOSTIC_(self%id_alk_pp, (alk_change + 2.0_rk * calcite_prod) * secs_pr_day)
+             if (self%calcify) _SET_DIAGNOSTIC_(self%id_alk_calcite, -2.0_rk * calcite_prod * secs_pr_day)
          end if
 
       _LOOP_END_
